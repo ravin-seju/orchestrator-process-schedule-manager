@@ -25,9 +25,9 @@ export const stressTenantInfos: TenantInfo[] = stressScheduleCounts.map((count) 
 const stressFolders: Folder[] = [
   { Id: 8101, DisplayName: 'Shared', FullyQualifiedName: 'Shared' },
   { Id: 8102, DisplayName: 'Finance Ops', FullyQualifiedName: 'Finance Ops' },
-  { Id: 8103, DisplayName: 'Customer Ops', FullyQualifiedName: 'Customer Ops' },
-  { Id: 8104, DisplayName: 'IT Operations', FullyQualifiedName: 'IT Operations' },
-  { Id: 8105, DisplayName: 'HR Automation', FullyQualifiedName: 'HR Automation' },
+  { Id: 8103, DisplayName: 'Onboarding', FullyQualifiedName: 'Finance Ops/Onboarding' },
+  { Id: 8104, DisplayName: 'Customer Ops', FullyQualifiedName: 'Customer Ops' },
+  { Id: 8105, DisplayName: 'Patching', FullyQualifiedName: 'IT Operations/Patching' },
   { Id: 8106, DisplayName: 'Platform Services', FullyQualifiedName: 'Platform Services' },
 ]
 
@@ -198,15 +198,96 @@ export const createStressScheduleData = (count: StressScheduleCount): LoadSchedu
     displayName: `Stress ${count}`,
     source: 'configured',
   }
-  const buckets = buildBucketSequence(count)
-  const schedules = buckets.map((bucket, index) =>
-    buildProcessSchedule(bucket, index, stressFolders[index % stressFolders.length]),
-  )
+  const showcase = buildShowcaseSchedules()
+  const generatedCount = Math.max(0, count - showcase.length)
+  const generated = generatedCount === 0
+    ? []
+    : buildBucketSequence(generatedCount)
+        .map((bucket, index) => buildProcessSchedule(bucket, index, stressFolders[index % stressFolders.length]))
+        .slice(0, generatedCount)
 
   return {
     tenant,
     folders: stressFolders,
-    schedules,
+    schedules: [...showcase, ...generated],
     failedFolders: [],
   }
+}
+
+const folderById = (id: number): Folder =>
+  stressFolders.find((folder) => folder.Id === id) ?? stressFolders[0]
+
+const showcaseScheduleBase = (
+  override: Partial<ProcessSchedule> & Pick<ProcessSchedule, 'Id' | 'Name' | 'folderId'>,
+): ProcessSchedule => {
+  const folder = folderById(override.folderId)
+  return {
+    Enabled: true,
+    ReleaseId: override.Id + 100,
+    ReleaseKey: `stress-showcase-${override.Id}`,
+    ReleaseName: `${override.Name.replace(/\s+/g, '')}.Main.xaml`,
+    PackageName: `${override.Name.replace(/\s+/g, '')}.Package`,
+    StartProcessCron: '0 0 9 1/1 * ?',
+    StartProcessCronDetails: JSON.stringify({ type: 2, daily: { atHour: 9, atMinute: 0 } }),
+    StartProcessCronSummary: 'At 09:00 AM',
+    StartProcessNextOccurrence: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    TimeZoneId: 'Central Standard Time',
+    TimeZoneIana: 'America/Chicago',
+    folderName: folder.FullyQualifiedName ?? folder.DisplayName ?? `Folder ${folder.Id}`,
+    ...override,
+  }
+}
+
+const buildShowcaseSchedules = (): ProcessSchedule[] => {
+  const stalePast = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString()
+
+  return [
+    showcaseScheduleBase({
+      Id: 95001,
+      Name: 'Customer Intake Queue',
+      folderId: 8104,
+      QueueDefinitionId: 5001,
+      StartProcessCron: '0 0/5 * 1/1 * ?',
+      StartProcessCronDetails: JSON.stringify({ type: 1, hourly: { atHour: 0, atMinute: 0 } }),
+      StartProcessCronSummary: 'Every 5 minutes (polling)',
+    }),
+    showcaseScheduleBase({
+      Id: 95002,
+      Name: 'Legacy Backfill One-Off',
+      folderId: 8101,
+      StartProcessCron: 'one-time',
+      StartProcessCronDetails: JSON.stringify({ type: 5 }),
+      StartProcessCronSummary: 'One-time at 09:00 AM',
+      StartProcessNextOccurrence: stalePast,
+    }),
+    showcaseScheduleBase({
+      Id: 95003,
+      Name: 'Suspended Nightly Report',
+      folderId: 8106,
+      Enabled: false,
+      StartProcessCron: '0 0 22 1/1 * ?',
+      StartProcessCronDetails: JSON.stringify({ type: 2, daily: { atHour: 22, atMinute: 0 } }),
+      StartProcessCronSummary: 'At 10:00 PM',
+    }),
+    showcaseScheduleBase({
+      Id: 95004,
+      Name: 'Finance Month-End Snapshot',
+      folderId: 8102,
+      ReleaseId: 75001,
+      ReleaseKey: 'stress-showcase-dup',
+      StartProcessCron: '0 30 14 1/1 * ?',
+      StartProcessCronDetails: JSON.stringify({ type: 2, daily: { atHour: 14, atMinute: 30 } }),
+      StartProcessCronSummary: 'At 02:30 PM',
+    }),
+    showcaseScheduleBase({
+      Id: 95005,
+      Name: 'Finance Month-End Snapshot',
+      folderId: 8102,
+      ReleaseId: 75001,
+      ReleaseKey: 'stress-showcase-dup',
+      StartProcessCron: '0 30 14 1/1 * ?',
+      StartProcessCronDetails: JSON.stringify({ type: 2, daily: { atHour: 14, atMinute: 30 } }),
+      StartProcessCronSummary: 'At 02:30 PM',
+    }),
+  ]
 }
