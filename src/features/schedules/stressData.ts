@@ -52,7 +52,7 @@ export const parseStressScheduleCount = (search: string): StressScheduleCount | 
     : null
 }
 
-const buildBucketSequence = (count: StressScheduleCount) => {
+const buildBucketSequence = (count: number) => {
   const minuteCount = count >= 5 ? (count >= 100 ? 2 : 1) : 0
   const hourlyCount = Math.max(1, Math.round(count * 0.1))
   const weeklyCount = Math.max(1, Math.round(count * 0.18))
