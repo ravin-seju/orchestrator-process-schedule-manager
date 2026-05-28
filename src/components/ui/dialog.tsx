@@ -23,12 +23,12 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
-  ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { showClose?: boolean }
->(({ children, className, onOpenAutoFocus, showClose = true, ...props }, ref) => (
+  ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { showClose?: boolean; elevated?: boolean }
+>(({ children, className, onOpenAutoFocus, showClose = true, elevated = false, ...props }, ref) => (
   <DialogPortal>
-    <DialogOverlay />
+    <DialogOverlay className={elevated ? 'ui-dialog-overlay--elevated' : undefined} />
     <DialogPrimitive.Content
-      className={cn('ui-dialog-content', className)}
+      className={cn('ui-dialog-content', elevated && 'ui-dialog-content--elevated', className)}
       ref={ref}
       onOpenAutoFocus={(event) => {
         if (onOpenAutoFocus) {

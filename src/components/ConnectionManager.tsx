@@ -340,6 +340,7 @@ export function ConnectionManager({ compact = false }: { compact?: boolean }) {
               aria-label="Confirm connection switch"
               className="connection-confirmation-card"
               showClose={false}
+              elevated
             >
               <div>
                 <DialogTitle asChild>
@@ -376,6 +377,7 @@ export function ConnectionManager({ compact = false }: { compact?: boolean }) {
               aria-label="Confirm connection delete"
               className="connection-confirmation-card"
               showClose={false}
+              elevated
             >
               <div>
                 <DialogTitle asChild>
