@@ -23,7 +23,19 @@ Create a **non-confidential** External Application in your UiPath organization w
 OR.Folders.Read OR.Execution.Read OR.Jobs.Read
 ```
 
-Grant the intended users or groups Orchestrator read access to the tenants and folders they should inspect. To show triggers across all intended folders, users need folder/process/trigger/job read access across those folders.
+### Orchestrator roles
+
+**App users** (view-only, recommended for most users) — create a custom folder-level role with View access on:
+
+- Apps
+- Triggers
+- Subfolders
+- Jobs
+- Processes
+
+Assign this role on each folder the user should see. No default UiPath role covers this exact read-only set.
+
+**App deployers and schedule admins** — assign the `Folder Administrator` default role on the target folder, plus `Allow to Be Folder Administrator` at tenant level. This grants the `Apps.Create`/`Apps.Edit` permissions required by the deploy CLI, and full trigger management for users who also create or edit schedules.
 
 The redirect URI must match where the app runs:
 
@@ -74,6 +86,8 @@ uip codedapp pack dist --name "Process Schedule Manager" --version <version>
 uip codedapp publish --name "Process Schedule Manager" --version <version> --type Web
 uip codedapp deploy --name "Process Schedule Manager" --version <version> --folder-key <folder-key>
 ```
+
+The account running these commands must have the `Folder Administrator` role on the target folder. See [Orchestrator roles](#orchestrator-roles) in Prerequisites.
 
 After deployment, copy the deployed app URL and add it as a redirect URI in your non-confidential External App. Then open the app, add your connection details, and sign in.
 
