@@ -10,6 +10,9 @@ import { isTestingPath } from '../calendarDisplay'
 import { loadProcessSchedules, loadTenants } from '../orchestrator'
 import type { LoadSchedulesResult, TenantInfo } from '../orchestrator'
 import type { TenantOption } from '../types'
+import { cacheGetEntry, cacheSet, cacheClear, cacheKey } from '@/features/orchestrator/cache'
+
+const SCHEDULES_TTL_MS = 15 * 60 * 1000
 
 type StressDataModule = typeof import('../stressData')
 
@@ -39,6 +42,7 @@ export function useScheduleData(sdk?: UiPath | null, configuredTenantNames: stri
   const [tenantError, setTenantError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isRevalidating, setIsRevalidating] = useState(false)
   const selectedStressCount = useMemo(
     () => (isTestingEnvironment && stressModule ? stressModule.parseStressTenantName(selectedTenant) : null),
     [isTestingEnvironment, selectedTenant, stressModule],
@@ -166,8 +170,13 @@ export function useScheduleData(sdk?: UiPath | null, configuredTenantNames: stri
       return
     }
 
+    const schedKey = cacheKey('schedules', sdk.config.orgName, selectedTenant)
+    cacheClear(schedKey)
+
     try {
-      setData(await loadProcessSchedules(sdk, selectedTenant, savedTenantNames))
+      const result = await loadProcessSchedules(sdk, selectedTenant, savedTenantNames)
+      cacheSet(schedKey, result, SCHEDULES_TTL_MS)
+      setData(result)
     } catch (err) {
       console.error('Failed to load triggers:', err)
       setLoadError(err instanceof Error ? err.message : 'Failed to load triggers')
@@ -200,10 +209,39 @@ export function useScheduleData(sdk?: UiPath | null, configuredTenantNames: stri
         return
       }
 
+      const schedKey = cacheKey('schedules', sdk.config.orgName, selectedTenant)
+      const cached = cacheGetEntry<LoadSchedulesResult>(schedKey)
+      if (cached) {
+        if (!isActive) return
+        setData(cached.data)
+        setLoadError(null)
+        setIsLoading(false)
+
+        // Stale-while-revalidate: serve cached instantly, refresh in background.
+        if (cached.isStale) {
+          setIsRevalidating(true)
+          loadProcessSchedules(sdk, selectedTenant, savedTenantNames)
+            .then((result) => {
+              if (!isActive) return
+              cacheSet(schedKey, result, SCHEDULES_TTL_MS)
+              setData(result)
+            })
+            .catch((err) => {
+              // Background refresh failure is non-fatal — cached data stays on screen.
+              console.warn('Background trigger refresh failed:', err)
+            })
+            .finally(() => {
+              if (isActive) setIsRevalidating(false)
+            })
+        }
+        return
+      }
+
       try {
         const result = await loadProcessSchedules(sdk, selectedTenant, savedTenantNames)
         if (!isActive) return
 
+        cacheSet(schedKey, result, SCHEDULES_TTL_MS)
         setData(result)
         setLoadError(null)
       } catch (err) {
@@ -244,6 +282,7 @@ export function useScheduleData(sdk?: UiPath | null, configuredTenantNames: stri
     activeTenant,
     data,
     isLoading,
+    isRevalidating,
     isTestingEnvironment,
     loadError,
     refresh,

@@ -24,6 +24,7 @@ import type { ScheduleOccurrence } from '../scheduleUtils'
 import type {
   CalendarDisplayItem,
   CalendarViewMode,
+  RuntimeStats,
   SelectedDayDetail,
   ViewMode,
 } from '../types'
@@ -56,6 +57,7 @@ export function useCalendarModel({
   calendarMode,
   filteredSchedules,
   monthSpanLaneLimit,
+  runtimeStats,
   selectedDayDetail,
   viewDate,
   viewMode,
@@ -64,6 +66,7 @@ export function useCalendarModel({
   calendarMode: CalendarViewMode
   filteredSchedules: ProcessSchedule[]
   monthSpanLaneLimit: number
+  runtimeStats?: Map<number, RuntimeStats>
   selectedDayDetail: SelectedDayDetail | null
   viewDate: Date
   viewMode: ViewMode
@@ -114,13 +117,14 @@ export function useCalendarModel({
             calendarDays,
             calendarItemsByDay,
             calendarMode === 'month' ? monthSpanLaneLimit : weekSpanLaneLimit,
+            runtimeStats,
           ),
         {
           days: calendarDays.length,
           mode: calendarMode,
         },
       ),
-    [calendarDays, calendarItemsByDay, calendarMode, monthSpanLaneLimit, weekSpanLaneLimit],
+    [calendarDays, calendarItemsByDay, calendarMode, monthSpanLaneLimit, runtimeStats, weekSpanLaneLimit],
   )
   const calendarTitle =
     calendarMode === 'year'

@@ -40,6 +40,7 @@ export function AppHeader({
   environmentDisplayLabel,
   headerFilterChips,
   isLoading,
+  isRevalidating,
   metrics,
   nextThemeLabel,
   onManageConnection,
@@ -60,6 +61,7 @@ export function AppHeader({
   environmentDisplayLabel: string
   headerFilterChips: HeaderFilterChip[]
   isLoading: boolean
+  isRevalidating?: boolean
   metrics?: SummaryMetric[]
   nextThemeLabel: string
   onManageConnection?: () => void
@@ -81,8 +83,8 @@ export function AppHeader({
           <BrandGlyph />
           <h1>Process Schedule Manager</h1>
           <div className="header-badges" aria-label="Application context">
-            <span className="version-badge title-version-badge" title="Application version 1.0">
-              v1.0
+            <span className="version-badge title-version-badge" title="Application version 1.1">
+              v1.1
             </span>
             <span className={`env-badge env-${environmentDisplayLabel.toLowerCase()}`} title={`Environment: ${environmentDisplayLabel}`}>
               {environmentDisplayLabel}
@@ -156,8 +158,14 @@ export function AppHeader({
         >
           {resolvedTheme === 'dark' ? <Sun size={iconSize} aria-hidden="true" /> : <Moon size={iconSize} aria-hidden="true" />}
         </button>
-        <button className="icon-button" onClick={refresh} type="button" aria-label="Refresh">
-          {isLoading ? <Loader2 className="spin" size={iconSize} aria-hidden="true" /> : <RefreshCcw size={iconSize} aria-hidden="true" />}
+        <button
+          className="icon-button"
+          onClick={refresh}
+          type="button"
+          aria-label={isRevalidating ? 'Updating' : 'Refresh'}
+          title={isRevalidating ? 'Updating…' : 'Refresh'}
+        >
+          {isLoading || isRevalidating ? <Loader2 className="spin" size={iconSize} aria-hidden="true" /> : <RefreshCcw size={iconSize} aria-hidden="true" />}
         </button>
       </div>
       {metrics && metrics.length > 0 ? (() => {

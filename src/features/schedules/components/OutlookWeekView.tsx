@@ -8,7 +8,9 @@ import {
 import { formatNumber, formatRunCount } from '../formatters'
 import { weekdayLabels } from '../constants'
 import { timeLabel } from '../scheduleUtils'
-import type { CalendarDisplayItem, OutlookWeekTimedEvent, ProcessDayGroup, SelectedDayDetail } from '../types'
+import type { CalendarDisplayItem, OutlookWeekTimedEvent, ProcessDayGroup, RuntimeStats, SelectedDayDetail } from '../types'
+import { V11_ENABLED } from '@/features/v11'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const outlookHourHeight = 64
 const initialScrollHour = 8
@@ -425,12 +427,14 @@ export const OutlookWeekView = memo(function OutlookWeekView({
   calendarItemsByDay,
   onOpenDayDetail,
   onOpenTimeSlot,
+  runtimeStats,
   todayKey,
 }: {
   calendarDays: Date[]
   calendarItemsByDay: Map<string, CalendarDisplayItem[]>
   onOpenDayDetail: (item: ProcessDayGroup) => void
   onOpenTimeSlot: (detail: SelectedDayDetail) => void
+  runtimeStats?: Map<number, RuntimeStats>
   todayKey: string
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -439,8 +443,8 @@ export const OutlookWeekView = memo(function OutlookWeekView({
   const [dayColumnWidth, setDayColumnWidth] = useState<number | null>(null)
   const [scrollbarWidth, setScrollbarWidth] = useState(0)
   const layout = useMemo(
-    () => buildOutlookWeekLayout(calendarDays, calendarItemsByDay),
-    [calendarDays, calendarItemsByDay],
+    () => buildOutlookWeekLayout(calendarDays, calendarItemsByDay, undefined, V11_ENABLED ? runtimeStats : undefined),
+    [calendarDays, calendarItemsByDay, runtimeStats],
   )
   const allDaySpans = useMemo(() => buildAllDaySpans(layout.days), [layout.days])
   const visibleAllDaySpans = isAllDayExpanded
@@ -644,37 +648,60 @@ export const OutlookWeekView = memo(function OutlookWeekView({
                     {stack.visibleEvents.map((event) => {
                       const eventHeight = baseHeight
                       const title = `${event.item.schedule.Name} - ${event.item.bucketLabel} - ${event.occurrence.timeLabel}`
+                      const stats = V11_ENABLED ? runtimeStats?.get(event.item.schedule.Id) : undefined
+                      const typMinutes = stats ? Math.max(1, Math.ceil(stats.medianSec / 60)) : null
+                      const p90Minutes = stats ? Math.max(1, Math.ceil(stats.p90Sec / 60)) : null
 
                       return (
-                        <button
-                          className={`outlook-week-event ${event.item.schedule.Enabled ? '' : 'is-disabled'}`}
-                          key={event.id}
-                          onClick={
-                            stack.isDenseCluster
-                              ? openStackTimeRange
-                              : () =>
-                                  onOpenTimeSlot({
-                                    key: event.dayKey,
-                                    date: event.item.date,
-                                    minuteOfDay: event.startMinute,
-                                    scheduleKey: event.item.scheduleKey,
-                                    scope: 'schedule',
-                                  })
-                          }
-                          style={
-                            {
-                              ...groupAccentStyle(event.item),
-                              '--event-height': `${eventHeight}px`,
-                            } as CSSProperties
-                          }
-                          aria-label={`Show exact runs for ${title}`}
-                          title={`Show exact runs for ${title}`}
-                          type="button"
-                        >
-                          <span className="outlook-event-copy">
-                            <span className="outlook-event-title">{event.item.schedule.Name}</span>
-                          </span>
-                        </button>
+                        <Tooltip key={event.id}>
+                          <TooltipTrigger asChild>
+                            <button
+                              className={`outlook-week-event ${event.item.schedule.Enabled ? '' : 'is-disabled'}`}
+                              onClick={
+                                stack.isDenseCluster
+                                  ? openStackTimeRange
+                                  : () =>
+                                      onOpenTimeSlot({
+                                        key: event.dayKey,
+                                        date: event.item.date,
+                                        minuteOfDay: event.startMinute,
+                                        scheduleKey: event.item.scheduleKey,
+                                        scope: 'schedule',
+                                      })
+                              }
+                              style={
+                                {
+                                  ...groupAccentStyle(event.item),
+                                  '--event-height': `${eventHeight}px`,
+                                } as CSSProperties
+                              }
+                              aria-label={`Show exact runs for ${title}`}
+                              title={`Show exact runs for ${title}`}
+                              type="button"
+                            >
+                              <span className="outlook-event-copy">
+                                <span className="outlook-event-title">{event.item.schedule.Name}</span>
+                                {typMinutes !== null && (
+                                  <span className="outlook-event-meta">Typical {typMinutes}m</span>
+                                )}
+                              </span>
+                            </button>
+                          </TooltipTrigger>
+                          {V11_ENABLED && (
+                            <TooltipContent>
+                              <p className="tooltip-name">{event.item.schedule.Name}</p>
+                              {stats ? (
+                                <>
+                                  <p>Typical (median): {typMinutes}m</p>
+                                  <p>Worst case (p90): {p90Minutes}m</p>
+                                  <p>Based on {stats.sampleSize} runs</p>
+                                </>
+                              ) : (
+                                <p>No recent run history</p>
+                              )}
+                            </TooltipContent>
+                          )}
+                        </Tooltip>
                       )
                     })}
                     {stack.hiddenCount > 0 && !stack.isDenseCluster ? (

@@ -1,5 +1,5 @@
 import type { Folder, LoadSchedulesResult, ProcessSchedule, TenantInfo } from './orchestrator'
-import type { StressScheduleCount } from './types'
+import type { MachineInventoryEntry, RuntimeStats, StressScheduleCount } from './types'
 
 export const stressScheduleCounts = [5, 10, 50, 100] as const
 export const defaultStressScheduleCount: StressScheduleCount = 5
@@ -162,6 +162,45 @@ const buildScheduleTiming = (bucket: StressBucket, index: number) => {
   }
 }
 
+type MachineRobotEntry = Required<ProcessSchedule>['MachineRobots'][number]
+
+const stressMachinePool: MachineRobotEntry[] = [
+  { MachineId: 501, MachineName: 'ROBOT-VM-01', RobotId: 201, RobotName: 'Bot.Alpha' },
+  { MachineId: 502, MachineName: 'ROBOT-VM-02', RobotId: 202, RobotName: 'Bot.Beta' },
+  { MachineId: 503, MachineName: 'ROBOT-VM-03', RobotId: 203, RobotName: 'Bot.Gamma' },
+  { MachineId: 504, MachineName: 'ROBOT-VM-04', RobotId: 204, RobotName: 'Bot.Delta' },
+]
+
+export const stressMachineInventory: MachineInventoryEntry[] = [
+  { id: 501, name: 'ROBOT-VM-01', type: 'Standard', state: 'Available', lastReportingTime: new Date(Date.now() - 60_000).toISOString() },
+  { id: 502, name: 'ROBOT-VM-02', type: 'Standard', state: 'Available', lastReportingTime: new Date(Date.now() - 30_000).toISOString() },
+  { id: 503, name: 'ROBOT-VM-03', type: 'Standard', state: 'Busy', lastReportingTime: new Date(Date.now() - 15_000).toISOString() },
+  { id: 504, name: 'ROBOT-VM-04', type: 'Standard', state: 'Disconnected', lastReportingTime: new Date(Date.now() - 5 * 60_000).toISOString() },
+  { id: 505, name: 'ROBOT-VM-05', type: 'Unattended', state: 'Unresponsive', lastReportingTime: new Date(Date.now() - 20 * 60_000).toISOString() },
+  { id: 506, name: 'ROBOT-VM-06', type: 'Unattended', state: 'Unknown', lastReportingTime: null },
+]
+
+const buildStressRuntimeStats = (): Map<number, RuntimeStats> => {
+  const stats = new Map<number, RuntimeStats>()
+  // Every even-indexed generated schedule gets stats; odd → fallback ("No recent run history")
+  for (let i = 0; i < 200; i += 2) {
+    const isShort = (i / 2) % 2 === 0
+    stats.set(90000 + i, {
+      medianSec: isShort ? 180 : 1500,
+      p90Sec: isShort ? 240 : 2100,
+      sampleSize: isShort ? 15 : 8,
+    })
+  }
+  // Showcase schedules
+  stats.set(95001, { medianSec: 90, p90Sec: 150, sampleSize: 22 })
+  stats.set(95002, { medianSec: 3600, p90Sec: 4500, sampleSize: 5 })
+  stats.set(95004, { medianSec: 720, p90Sec: 960, sampleSize: 12 })
+  stats.set(95005, { medianSec: 720, p90Sec: 960, sampleSize: 12 })
+  return stats
+}
+
+export const stressRuntimeStats = buildStressRuntimeStats()
+
 const buildProcessSchedule = (
   bucket: StressBucket,
   index: number,
@@ -172,6 +211,11 @@ const buildProcessSchedule = (
   const baseName = names[index % names.length]
   const displayNumber = String(index + 1).padStart(3, '0')
   const processSlug = `${folder.DisplayName ?? 'Folder'} ${baseName}`.replace(/\s+/g, '')
+  const primaryMachine = stressMachinePool[index % stressMachinePool.length]
+  const machineRobots: MachineRobotEntry[] =
+    index % 5 === 0 && index > 0
+      ? [primaryMachine, stressMachinePool[(index + 1) % stressMachinePool.length]]
+      : [primaryMachine]
 
   return {
     Id: 90000 + index,
@@ -189,6 +233,7 @@ const buildProcessSchedule = (
     TimeZoneIana: 'America/Chicago',
     folderId: folder.Id,
     folderName: folder.FullyQualifiedName ?? folder.DisplayName ?? `Folder ${folder.Id}`,
+    MachineRobots: machineRobots,
   }
 }
 
@@ -234,6 +279,7 @@ const showcaseScheduleBase = (
     TimeZoneId: 'Central Standard Time',
     TimeZoneIana: 'America/Chicago',
     folderName: folder.FullyQualifiedName ?? folder.DisplayName ?? `Folder ${folder.Id}`,
+    MachineRobots: [stressMachinePool[override.Id % stressMachinePool.length]],
     ...override,
   }
 }
@@ -278,6 +324,7 @@ const buildShowcaseSchedules = (): ProcessSchedule[] => {
       StartProcessCron: '0 30 14 1/1 * ?',
       StartProcessCronDetails: JSON.stringify({ type: 2, daily: { atHour: 14, atMinute: 30 } }),
       StartProcessCronSummary: 'At 02:30 PM',
+      MachineRobots: [stressMachinePool[0]],
     }),
     showcaseScheduleBase({
       Id: 95005,
@@ -288,6 +335,7 @@ const buildShowcaseSchedules = (): ProcessSchedule[] => {
       StartProcessCron: '0 30 14 1/1 * ?',
       StartProcessCronDetails: JSON.stringify({ type: 2, daily: { atHour: 14, atMinute: 30 } }),
       StartProcessCronSummary: 'At 02:30 PM',
+      MachineRobots: [stressMachinePool[0]],
     }),
   ]
 }

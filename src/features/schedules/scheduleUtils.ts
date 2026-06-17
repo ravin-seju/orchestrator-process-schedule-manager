@@ -346,6 +346,12 @@ export const getScheduleSummary = (schedule: ProcessSchedule) => {
 export const isQueueTrigger = (schedule: ProcessSchedule): boolean =>
   schedule.QueueDefinitionId !== null && schedule.QueueDefinitionId !== undefined
 
+export const getAssignedMachineIds = (schedule: ProcessSchedule): number[] =>
+  schedule.MachineRobots?.map((mr) => mr.MachineId) ?? []
+
+export const getAssignedRobotIds = (schedule: ProcessSchedule): number[] =>
+  schedule.MachineRobots?.map((mr) => mr.RobotId).filter((id): id is number => id != null) ?? []
+
 export const getScheduleOccurrences = (
   schedule: ProcessSchedule,
   start: Date,

@@ -709,7 +709,6 @@ describe('CalendarWorkbench component', () => {
     const { props } = renderCalendarWorkbench()
 
     expect(screen.getByRole('heading', { name: 'May 2026' })).toBeInTheDocument()
-    expect(screen.getByText('Legend')).toBeInTheDocument()
     const viewModeSelect = screen.getByRole('combobox', { name: /trigger layout/i })
     expect(viewModeSelect).toHaveTextContent('Bars')
     openRadixSelect(viewModeSelect)

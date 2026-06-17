@@ -25,12 +25,27 @@ import type {
   OutlookWeekTimedEvent,
   ProcessDayGroup,
   RecurrenceBucket,
+  RuntimeStats,
   ScheduleSearchEntry,
   SpanBarLayout,
   ViewMode,
 } from './types'
 
-const FOLDER_PALETTE_SIZE = 7
+const rootFolderName = (folderName: string): string =>
+  (folderName.split('/')[0] ?? folderName).trim() || folderName
+
+// djb2-style string hash → hue 0..359, deterministic per root folder name
+const hashHue = (name: string): number => {
+  let h = 5381
+  for (let i = 0; i < name.length; i += 1) h = ((h << 5) + h + name.charCodeAt(i)) >>> 0
+  return h % 360
+}
+
+export const folderColorVars = (folderName: string): CSSProperties => {
+  const hue = hashHue(rootFolderName(folderName))
+  const accent = `hsl(${hue} 62% 55%)`
+  return { '--folder-accent': accent, '--bucket-accent': accent } as CSSProperties
+}
 
 export const buildScheduleSearchIndex = (schedules: ProcessSchedule[]): ScheduleSearchEntry[] =>
   schedules.map((schedule) => ({
@@ -50,12 +65,7 @@ export const buildScheduleSearchIndex = (schedules: ProcessSchedule[]): Schedule
 
 export const isTestingPath = (pathname: string) => pathname.replace(/\/+$/, '').endsWith('/testing')
 
-export const folderAccentStyle = (folderId: number): CSSProperties => {
-  const idx = (Math.abs(folderId) % FOLDER_PALETTE_SIZE) + 1
-  return {
-    '--folder-accent': `var(--folder-${idx}-accent)`,
-  } as CSSProperties
-}
+export const folderAccentStyle = (folderName: string): CSSProperties => folderColorVars(folderName)
 
 export const scheduleKey = (schedule: ProcessSchedule) => `${schedule.folderId}-${schedule.Id}`
 
@@ -170,10 +180,8 @@ export const recurrenceAccentStyle = (bucket: RecurrenceBucket): CSSProperties =
     '--bucket-soft': `var(--bucket-${bucket}-soft)`,
   }) as CSSProperties
 
-export const groupAccentStyle = (group: ProcessDayGroup): CSSProperties => ({
-  ...folderAccentStyle(group.schedule.folderId),
-  ...recurrenceAccentStyle(group.bucket),
-})
+export const groupAccentStyle = (group: ProcessDayGroup): CSSProperties =>
+  folderColorVars(group.schedule.folderName)
 
 const occurrenceMinuteOfDay = (date: Date) => date.getHours() * 60 + date.getMinutes()
 const compareOccurrences = (a: ScheduleOccurrence, b: ScheduleOccurrence) => a.date.getTime() - b.date.getTime()
@@ -250,16 +258,34 @@ export const buildProcessDayGroups = (occurrences: ScheduleOccurrence[]) => {
   )
 }
 
-const getSpanTimingLabel = (item: ProcessDayGroup, dayCount: number) => {
-  if (dayCount > 1 && item.runCount > 1) return `${formatNumber(item.runCount)}/day`
-  if (dayCount > 1) return formatDayCount(dayCount)
-  return item.runCount > 1 ? formatRunCount(item.runCount) : item.firstOccurrence.timeLabel
+const getSpanTimingLabel = (
+  item: ProcessDayGroup,
+  dayCount: number,
+  runtimeStats?: Map<number, RuntimeStats>,
+) => {
+  let base: string
+  if (dayCount > 1 && item.runCount > 1) {
+    base = `${formatNumber(item.runCount)}/day`
+  } else if (dayCount > 1) {
+    base = formatDayCount(dayCount)
+  } else {
+    base = item.runCount > 1 ? formatRunCount(item.runCount) : item.firstOccurrence.timeLabel
+  }
+
+  const stats = runtimeStats?.get(item.schedule.Id)
+  if (stats) {
+    const typMinutes = Math.max(1, Math.ceil(stats.medianSec / 60))
+    return `${base} (typ. ~${typMinutes}m)`
+  }
+
+  return base
 }
 
 export const buildSpanBarLayout = (
   calendarDays: Date[],
   itemsByDay: Map<string, CalendarDisplayItem[]>,
   visibleLaneLimit: number,
+  runtimeStats?: Map<number, RuntimeStats>,
 ): SpanBarLayout => {
   const bars: CalendarSpanBar[] = []
   const hiddenCountByDay = new Map<string, number>()
@@ -312,7 +338,7 @@ export const buildSpanBarLayout = (
           weekIndex,
           dayCount,
           totalRuns,
-          timingLabel: getSpanTimingLabel(firstItem, dayCount),
+          timingLabel: getSpanTimingLabel(firstItem, dayCount, runtimeStats),
         })
 
         dayIndex = endIndex
@@ -406,6 +432,7 @@ export const buildOutlookWeekLayout = (
   calendarDays: Date[],
   itemsByDay: Map<string, CalendarDisplayItem[]>,
   blockMinutes = outlookWeekDefaultBlockMinutes,
+  runtimeStats?: Map<number, RuntimeStats>,
 ) => ({
   days: calendarDays.map((day) => {
     const key = dateKey(day)
@@ -422,9 +449,14 @@ export const buildOutlookWeekLayout = (
         continue
       }
 
+      const stats = runtimeStats?.get(item.schedule.Id)
+      const eventBlockMinutes = stats
+        ? Math.max(5, Math.ceil(stats.medianSec / 60))
+        : blockMinutes
+
       for (const occurrence of item.occurrences) {
         const startMinute = occurrenceMinuteOfDay(occurrence.date)
-        const endMinute = Math.min(24 * 60, startMinute + blockMinutes)
+        const endMinute = Math.min(24 * 60, startMinute + eventBlockMinutes)
         timedEvents.push({
           id: `${item.id}-${occurrence.id}-timed`,
           item,

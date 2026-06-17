@@ -94,3 +94,17 @@ export type SelectedDayDetail = {
   scope?: SelectedDayDetailScope
   startMinute?: number
 }
+
+export interface MachineInventoryEntry {
+  id: number
+  name: string
+  type: string
+  state: 'Available' | 'Busy' | 'Disconnected' | 'Unresponsive' | 'Unknown'
+  lastReportingTime: string | null
+}
+
+export interface RuntimeStats {
+  medianSec: number
+  p90Sec: number
+  sampleSize: number
+}

@@ -10,6 +10,7 @@ import {
   getAvailableAuthConfigs,
   getMissingRequiredScopes,
   getSelectedAuthConfigId,
+  REQUIRED_ORCHESTRATOR_SCOPES,
   resetCustomAuthConfigs,
   setSelectedAuthConfigId,
   updateCustomAuthConfig,
@@ -84,14 +85,11 @@ const assertConfiguredRequiredScopes = (configuredScope: string) => {
 const assertRequiredScopes = (token: string | undefined, configuredScope: string) => {
   assertConfiguredRequiredScopes(configuredScope)
   const tokenScopes = getTokenScopes(token)
-  const missingTokenScopes = configuredScope
-    .split(/\s+/)
-    .filter(Boolean)
-    .filter((scope) => !tokenScopes.has(scope))
+  const missingTokenScopes = REQUIRED_ORCHESTRATOR_SCOPES.filter((scope) => !tokenScopes.has(scope))
 
   if (missingTokenScopes.length) {
     throw new Error(
-      `UiPath token is missing configured scope(s): ${missingTokenScopes.join(', ')}. Confirm the External App includes them, then sign in again.`,
+      `UiPath token is missing required scope(s): ${missingTokenScopes.join(', ')}. Confirm the External App includes them, then sign in again.`,
     )
   }
 }

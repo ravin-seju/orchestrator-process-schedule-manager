@@ -150,7 +150,9 @@ function sanitizeExternalApps(
     .map((externalApp) => ({
       clientId: externalApp.clientId.trim(),
       name: externalApp.name.trim(),
-      scope: forceRequiredScope ? REQUIRED_ORCHESTRATOR_SCOPE_TEXT : externalApp.scope.trim(),
+      scope: forceRequiredScope
+        ? [...new Set([...parseScopes(REQUIRED_ORCHESTRATOR_SCOPE_TEXT), ...parseScopes(externalApp.scope)])].join(' ')
+        : externalApp.scope.trim(),
       urlAppRedirect: externalApp.urlAppRedirect.trim(),
     }))
     .filter((externalApp) => externalApp.clientId)

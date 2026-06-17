@@ -2,7 +2,7 @@ import {
   countScheduleRunsInRange,
 } from './calendarDisplay'
 import type { ProcessSchedule } from './orchestrator'
-import { getCachedScheduleOccurrences, isQueueTrigger, isStaleSchedule } from './scheduleUtils'
+import { getAssignedMachineIds, getCachedScheduleOccurrences, isQueueTrigger, isStaleSchedule } from './scheduleUtils'
 import type { StatusFilter } from './types'
 
 export type SummaryMetricKey =
@@ -71,18 +71,39 @@ const countStale = (schedules: ProcessSchedule[]): number => {
   return count
 }
 
-const countCollisions = (schedules: ProcessSchedule[], windowStart: Date, windowEnd: Date): number => {
+const countCollisions = (
+  schedules: ProcessSchedule[],
+  windowStart: Date,
+  windowEnd: Date,
+  machineScope?: Set<number>,
+): number => {
+  const scoped = machineScope != null && machineScope.size > 0
   const slots = new Map<string, Set<ProcessSchedule>>()
   for (const schedule of schedules) {
     if (!schedule.Enabled) continue
     if (isQueueTrigger(schedule)) continue
+
+    const scopedIds = scoped
+      ? getAssignedMachineIds(schedule).filter((id) => machineScope!.has(id))
+      : null
+    if (scoped && scopedIds!.length === 0) continue
+
     const occurrences = getCachedScheduleOccurrences(schedule, windowStart, windowEnd)
     for (const occ of occurrences) {
       const d = occ.date
-      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}-${d.getMinutes()}`
-      const set = slots.get(key) ?? new Set<ProcessSchedule>()
-      set.add(schedule)
-      slots.set(key, set)
+      const tsKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}-${d.getMinutes()}`
+      if (scoped) {
+        for (const machineId of scopedIds!) {
+          const key = `${machineId}-${tsKey}`
+          const set = slots.get(key) ?? new Set<ProcessSchedule>()
+          set.add(schedule)
+          slots.set(key, set)
+        }
+      } else {
+        const set = slots.get(tsKey) ?? new Set<ProcessSchedule>()
+        set.add(schedule)
+        slots.set(tsKey, set)
+      }
     }
   }
   const colliding = new Set<ProcessSchedule>()
@@ -97,22 +118,25 @@ const COLLISION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 export function buildSummaryMetricData({
   schedules,
+  selectedMachineIds,
   statusFilter,
   todayEnd,
   todayStart,
 }: {
   schedules: ProcessSchedule[]
+  selectedMachineIds?: number[]
   statusFilter: StatusFilter
   todayEnd: Date
   todayStart: Date
 }): SummaryMetricData[] {
+  const machineScope = selectedMachineIds?.length ? new Set(selectedMachineIds) : undefined
   const enabledSchedules = schedules.filter((schedule) => schedule.Enabled)
   const disabledSchedules = schedules.filter((schedule) => !schedule.Enabled)
   const folderCount = countUniqueFolders(schedules)
   const duplicateCount = countDuplicateSchedules(schedules)
   const collisionWindowEnd = new Date(todayStart.getTime() + COLLISION_WINDOW_MS)
   const staleCount = countStale(schedules)
-  const collisionCount = countCollisions(schedules, todayStart, collisionWindowEnd)
+  const collisionCount = countCollisions(schedules, todayStart, collisionWindowEnd, machineScope)
 
   const baseMetrics: SummaryMetricData[] = [
     {

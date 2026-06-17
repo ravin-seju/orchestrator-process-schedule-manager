@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   Copy,
   Folder,
-  ShieldAlert,
   Zap,
 } from 'lucide-react'
 import {
@@ -21,12 +20,12 @@ import {
   iconSize,
   maxMonthSpanLaneLimit,
   minMonthSpanLaneLimit,
+  defaultTenantName,
   monthSpanLaneStepPx,
   monthSpanReservedHeightPx,
   viewModeStorageKey,
   weekVisibleSpanRows,
 } from './constants'
-import { formatNumber } from './formatters'
 import {
   readInitialViewMode,
 } from './calendarDisplay'
@@ -58,6 +57,11 @@ import type {
   ViewMode,
   WorkspaceView,
 } from './types'
+import { V11_ENABLED } from '@/features/v11'
+import { useMachineInventory } from '@/features/machines/hooks/useMachineInventory'
+import { useJobRuntimes } from '@/features/jobs/hooks/useJobRuntimes'
+import { fetchOData, fetchODataMetadata } from '@/features/orchestrator/odataClient'
+import { cacheClear, cacheKey } from '@/features/orchestrator/cache'
 
 const testingRouteEnabled = import.meta.env.VITE_ENABLE_TESTING_ROUTE === 'true'
 const testingConnectionTitle = testingRouteEnabled
@@ -111,6 +115,7 @@ function Dashboard({
     activeTenant,
     data,
     isLoading,
+    isRevalidating,
     isTestingEnvironment,
     loadError,
     refresh,
@@ -122,6 +127,10 @@ function Dashboard({
     tenantOptions,
   } = useScheduleData(sdk, configuredTenantNames)
   const { resolvedTheme, setThemeMode } = useThemeMode()
+  const v11Sdk = V11_ENABLED ? sdk : undefined
+  const v11Tenant = V11_ENABLED && activeTenant.name !== defaultTenantName ? activeTenant.name : undefined
+  const { machines, error: machineError } = useMachineInventory(v11Sdk, v11Tenant)
+  if (machineError) console.error('[v11] Machine inventory error:', machineError)
   const [viewDate, setViewDate] = useState(() => new Date())
   const [calendarMode, setCalendarMode] = useState<CalendarViewMode>('month')
   const [viewMode, setViewMode] = useState<ViewMode>(readInitialViewMode)
@@ -135,13 +144,43 @@ function Dashboard({
   const [triggerTypeFilter, setTriggerTypeFilter] = useState<TriggerTypeFilter>('all')
   const [attentionFilter, setAttentionFilter] = useState<AttentionFilter>('none')
   const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([])
+  const [selectedMachineIds, setSelectedMachineIds] = useState<number[]>([])
+  const [selectedRobotIds, setSelectedRobotIds] = useState<number[]>([])
   const calendarGridRef = useRef<HTMLDivElement | null>(null)
+
+  const handleFullRefresh = useCallback(() => {
+    if (sdk && v11Tenant) {
+      const org = sdk.config.orgName
+      cacheClear(cacheKey('runtimeStats', org, v11Tenant))
+      cacheClear(cacheKey('machines', org, v11Tenant))
+    }
+    refresh()
+  }, [sdk, v11Tenant, refresh])
 
   useEffect(() => {
     window.localStorage.setItem(viewModeStorageKey, viewMode)
   }, [viewMode])
   const folders = data?.folders ?? emptyFolders
   const schedules = data?.schedules ?? emptySchedules
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !V11_ENABLED || !sdk || activeTenant.name === defaultTenantName) return
+    const tenant = activeTenant.name
+    const firstFolderId = folders[0]?.Id
+    const debugObj = {
+      fetch: (path: string, folderId?: number) => fetchOData(sdk, tenant, path, folderId),
+      metadata: () => fetchODataMetadata(sdk, tenant),
+      sessions: (folderId = firstFolderId) => fetchOData(sdk, tenant, 'Sessions?$top=10', folderId),
+      robots: (folderId = firstFolderId) => fetchOData(sdk, tenant, 'Robots?$top=10', folderId),
+    }
+    ;(window as unknown as Record<string, unknown>).__orchestratorDebug = debugObj
+    return () => { delete (window as unknown as Record<string, unknown>).__orchestratorDebug }
+  }, [sdk, activeTenant, folders])
+  const v11FolderIds = useMemo(
+    () => (V11_ENABLED ? Array.from(new Set(schedules.map((s) => s.folderId))) : []),
+    [schedules],
+  )
+  const { runtimeStats } = useJobRuntimes(v11Sdk, v11Tenant, v11FolderIds.length ? v11FolderIds : undefined)
   const statusAwareFolders = useMemo(
     () => getStatusAwareFolders(folders, schedules, statusFilter),
     [folders, schedules, statusFilter],
@@ -174,6 +213,8 @@ function Dashboard({
     query,
     schedules,
     selectedFolderIds,
+    selectedMachineIds: V11_ENABLED ? selectedMachineIds : [],
+    selectedRobotIds: V11_ENABLED ? selectedRobotIds : [],
     statusFilter,
     triggerTypeFilter,
   })
@@ -194,6 +235,7 @@ function Dashboard({
     calendarMode,
     filteredSchedules,
     monthSpanLaneLimit,
+    runtimeStats: V11_ENABLED ? runtimeStats : undefined,
     selectedDayDetail,
     viewDate,
     viewMode,
@@ -211,6 +253,7 @@ function Dashboard({
     () =>
       buildSummaryMetricData({
         schedules: filteredSchedules,
+        selectedMachineIds: V11_ENABLED ? selectedMachineIds : undefined,
         statusFilter,
         todayEnd: todayRange.end,
         todayStart: todayRange.start,
@@ -218,7 +261,7 @@ function Dashboard({
         ...metric,
         icon: summaryIconForMetric(metric.key),
       })),
-    [filteredSchedules, statusFilter, todayRange],
+    [filteredSchedules, selectedMachineIds, statusFilter, todayRange],
   )
   const activeMetricKey: SummaryMetricKey | null =
     attentionFilter === 'duplicates'
@@ -228,6 +271,20 @@ function Dashboard({
         : attentionFilter === 'collisions'
           ? 'collisions'
           : null
+  const robotOptions = useMemo(() => {
+    if (!V11_ENABLED) return undefined
+    const seen = new Set<number>()
+    const options: { id: number; name: string }[] = []
+    for (const s of schedules) {
+      for (const mr of s.MachineRobots ?? []) {
+        if (mr.RobotId != null && !seen.has(mr.RobotId)) {
+          seen.add(mr.RobotId)
+          options.push({ id: mr.RobotId, name: mr.RobotName ?? `Robot ${mr.RobotId}` })
+        }
+      }
+    }
+    return options.sort((a, b) => a.name.localeCompare(b.name))
+  }, [schedules])
   const handleMetricClick = useCallback(
     (key: SummaryMetricKey) => {
       setSelectedDayDetail(null)
@@ -255,25 +312,7 @@ function Dashboard({
     duplicates: 'Duplicates only',
     stale: 'Stale only',
   }
-  const failedFolderNames = useMemo(
-    () =>
-      data?.failedFolders
-        .slice(0, 4)
-        .map((failure) => failure.folder.FullyQualifiedName ?? failure.folder.DisplayName ?? `Folder ${failure.folder.Id}`)
-        .join(', ') ?? '',
-    [data?.failedFolders],
-  )
-  const selectedFailedFolderIds = new Set(selectedFolderIds)
-  const selectedFailedFolder =
-    selectedFailedFolderIds.size > 0
-      ? data?.failedFolders.find((failure) => selectedFailedFolderIds.has(String(failure.folder.Id)))
-      : undefined
-  const hasNotices = Boolean(
-    tenantError ||
-      loadError ||
-      data?.failedFolders.length ||
-      selectedFailedFolder,
-  )
+  const hasNotices = Boolean(tenantError || loadError)
   const headerFilterChips = [
     trimmedQuery
       ? {
@@ -382,6 +421,7 @@ function Dashboard({
         environmentDisplayLabel={environmentDisplayLabel}
         headerFilterChips={headerFilterChips}
         isLoading={isLoading}
+        isRevalidating={isRevalidating}
         metrics={summaryMetrics}
         nextThemeLabel={nextThemeLabel}
         onManageConnection={onManageConnection}
@@ -392,7 +432,7 @@ function Dashboard({
           setSelectedDayDetail(null)
           setIsUpcomingExpanded(false)
         }}
-        refresh={refresh}
+        refresh={handleFullRefresh}
         resolvedTheme={resolvedTheme}
         selectedStressCount={selectedStressCount}
         selectedTenant={selectedTenant}
@@ -404,27 +444,6 @@ function Dashboard({
         <section className="notice-stack" aria-label="Sync notices">
           {tenantError ? <div className="notice warning">Tenant list fallback active: {tenantError}</div> : null}
           {loadError ? <div className="notice error">Error: {loadError}</div> : null}
-          {data?.failedFolders.length ? (
-            <div className="notice warning">
-              <ShieldAlert size={18} aria-hidden="true" />
-              <span>
-                {formatNumber(data.failedFolders.length)} folder{data.failedFolders.length === 1 ? '' : 's'} could not be read
-                because the app is missing trigger-view access
-                {failedFolderNames ? `: ${failedFolderNames}${data.failedFolders.length > 4 ? ', ...' : ''}` : ''}.
-              </span>
-            </div>
-          ) : null}
-          {selectedFailedFolder ? (
-            <div className="notice warning">
-              <ShieldAlert size={18} aria-hidden="true" />
-              <span>
-                {selectedFailedFolder.folder.FullyQualifiedName ??
-                  selectedFailedFolder.folder.DisplayName ??
-                  `Folder ${selectedFailedFolder.folder.Id}`}{' '}
-                returned: {selectedFailedFolder.message}
-              </span>
-            </div>
-          ) : null}
         </section>
       ) : null}
 
@@ -440,6 +459,12 @@ function Dashboard({
         statusAwareFolders={statusAwareFolders}
         triggerTypeFilter={triggerTypeFilter}
         workspaceView={workspaceView}
+        machines={V11_ENABLED ? machines : undefined}
+        selectedMachineIds={V11_ENABLED ? selectedMachineIds : undefined}
+        setSelectedMachineIds={V11_ENABLED ? setSelectedMachineIds : undefined}
+        robotOptions={robotOptions}
+        selectedRobotIds={V11_ENABLED ? selectedRobotIds : undefined}
+        setSelectedRobotIds={V11_ENABLED ? setSelectedRobotIds : undefined}
       />
 
       {workspaceView === 'calendar' ? (
@@ -459,6 +484,7 @@ function Dashboard({
             navigationUnitLabel={navigationUnitLabel}
             onOpenDayDetail={openDayDetail}
             onOpenMonthFromYear={openMonthFromYear}
+            runtimeStats={V11_ENABLED ? runtimeStats : undefined}
             setCalendarMode={setCalendarMode}
             setSelectedDayDetail={openSelectedDayDetail}
             setViewMode={setViewMode}

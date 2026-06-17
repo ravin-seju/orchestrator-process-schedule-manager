@@ -1,4 +1,6 @@
 import type { UiPath } from '@uipath/uipath-typescript/core'
+import { fetchOData, ODataFetchError, settledBatch } from '@/features/orchestrator/odataClient'
+import { V11_ENABLED } from '@/features/v11'
 
 export interface Folder {
   Id: number
@@ -23,6 +25,12 @@ export interface ProcessSchedule {
   TimeZoneId?: string | null
   TimeZoneIana?: string | null
   QueueDefinitionId?: number | null
+  MachineRobots?: Array<{
+    MachineId: number
+    MachineName: string
+    RobotId: number | null
+    RobotName: string | null
+  }>
   folderId: number
   folderName: string
 }
@@ -37,15 +45,11 @@ export interface LoadSchedulesResult {
   tenant: TenantInfo
   folders: Folder[]
   schedules: ProcessSchedule[]
-  failedFolders: Array<{ folder: Folder; message: string }>
+  failedFolders: Array<{ folder: Folder; message: string; reason?: 'missing-scope' }>
 }
 
 export interface LoadTenantsResult {
   tenants: TenantInfo[]
-}
-
-interface ODataCollection<T> {
-  value?: T[]
 }
 
 const configuredTenantNames = (activeTenantName?: string, savedTenantNames: string[] = []) => {
@@ -105,88 +109,6 @@ const normalizeDynamicTenant = (tenant: Record<string, unknown>): TenantInfo | n
   }
 }
 
-const readODataError = async (response: Response) => {
-  const text = await response.text()
-  if (!text) return `${response.status} ${response.statusText}`
-
-  try {
-    const parsed = JSON.parse(text) as {
-      error?: string | { message?: string }
-      message?: string
-    }
-
-    return typeof parsed.error === 'string'
-      ? parsed.error
-      : parsed.error?.message ?? parsed.message ?? text
-  } catch {
-    return text
-  }
-}
-
-const getAccessToken = (sdk: UiPath) => {
-  const token = sdk.getToken()
-  if (!token) {
-    throw new Error('UiPath sign-in token is unavailable. Sign in again and retry.')
-  }
-
-  return token
-}
-
-const deriveApiBaseUrl = (baseUrl: string) => {
-  const normalizedBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
-
-  try {
-    const parsed = new URL(normalizedBaseUrl)
-    if (parsed.hostname === 'staging.uipath.com') return 'https://staging.api.uipath.com'
-    if (parsed.hostname === 'cloud.uipath.com') return 'https://api.uipath.com'
-    if (parsed.hostname === 'alpha.uipath.com') return 'https://alpha.api.uipath.com'
-    if (
-      parsed.hostname === 'staging.api.uipath.com' ||
-      parsed.hostname === 'api.uipath.com' ||
-      parsed.hostname === 'alpha.api.uipath.com'
-    ) {
-      return parsed.origin
-    }
-
-    return normalizedBaseUrl
-  } catch {
-    return normalizedBaseUrl
-  }
-}
-
-const odataUrl = (sdk: UiPath, tenantName: string, path: string) => {
-  const apiBase = deriveApiBaseUrl(sdk.config.baseUrl)
-  const baseUrl = apiBase.endsWith('/') ? apiBase : `${apiBase}/`
-  const orgPath = encodeURIComponent(sdk.config.orgName)
-  const tenantPath = encodeURIComponent(tenantName)
-  const normalizedPath = path.replace(/^\//, '')
-
-  return new URL(`${orgPath}/${tenantPath}/orchestrator_/odata/${normalizedPath}`, baseUrl).toString()
-}
-
-const fetchOData = async <T>(
-  sdk: UiPath,
-  tenantName: string,
-  path: string,
-  folderId?: number,
-): Promise<ODataCollection<T>> => {
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-    Authorization: `Bearer ${getAccessToken(sdk)}`,
-  }
-
-  if (folderId !== undefined) {
-    headers['X-UIPATH-OrganizationUnitId'] = String(folderId)
-  }
-
-  const response = await fetch(odataUrl(sdk, tenantName, path), { headers })
-  if (!response.ok) {
-    throw new Error(await readODataError(response))
-  }
-
-  return response.json() as Promise<ODataCollection<T>>
-}
-
 export async function loadTenants(sdk: UiPath, savedTenantNames: string[] = []): Promise<LoadTenantsResult> {
   const fallbackTenants = configuredTenants(sdk.config.tenantName, savedTenantNames)
 
@@ -223,6 +145,72 @@ const selectedScheduleFields = [
   'QueueDefinitionId',
 ].join(',')
 
+const buildFolderNameMap = (folders: Folder[]): Map<number, string> =>
+  new Map(
+    folders.map((folder) => [
+      folder.Id,
+      folder.FullyQualifiedName ?? folder.DisplayName ?? `Folder ${folder.Id}`,
+    ]),
+  )
+
+// Per-folder fan-out: one ProcessSchedules request per folder. ProcessSchedules
+// is folder-scoped — Orchestrator rejects any query without a folder header
+// (errorCode 1101 "A folder is required for this action"), so this is the only
+// way to read tenant-wide. Volume is bounded by folder count; cache + the global
+// rate limiter keep it within API limits.
+async function loadProcessSchedulesPerFolder(
+  sdk: UiPath,
+  tenantName: string,
+  folders: Folder[],
+): Promise<{ schedules: ProcessSchedule[]; failedFolders: LoadSchedulesResult['failedFolders'] }> {
+  const baseScheduleQuery = `ProcessSchedules?$select=${selectedScheduleFields}&$orderby=Name&$top=1000`
+  // MachineRobots navigation property name is tenant-dependent; expand disabled until verified via $metadata
+  const v11ScheduleQuery = baseScheduleQuery
+  const folderNameById = buildFolderNameMap(folders)
+
+  const settled = await settledBatch(
+    folders,
+    10,
+    async (folder) => {
+      const scheduleResponse = await (V11_ENABLED
+        ? fetchOData<Record<string, unknown>>(sdk, tenantName, v11ScheduleQuery, folder.Id)
+            .catch((err) => {
+              if (err instanceof ODataFetchError) {
+                return fetchOData<Record<string, unknown>>(sdk, tenantName, baseScheduleQuery, folder.Id)
+              }
+              throw err
+            })
+        : fetchOData<Record<string, unknown>>(sdk, tenantName, baseScheduleQuery, folder.Id))
+      const folderName = folderNameById.get(folder.Id) ?? `Folder ${folder.Id}`
+      return (scheduleResponse.value ?? []).map((schedule) => ({
+        ...schedule,
+        folderId: folder.Id,
+        folderName,
+      })) as ProcessSchedule[]
+    },
+  )
+
+  const schedules: ProcessSchedule[] = []
+  const failedFolders: LoadSchedulesResult['failedFolders'] = []
+
+  settled.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      schedules.push(...result.value)
+      return
+    }
+
+    const err = result.reason
+    const message = err instanceof Error ? err.message : String(err)
+    const reason =
+      V11_ENABLED && err instanceof ODataFetchError && err.status === 403
+        ? ('missing-scope' as const)
+        : undefined
+    failedFolders.push({ folder: folders[index], message, reason })
+  })
+
+  return { failedFolders, schedules }
+}
+
 export async function loadProcessSchedules(
   sdk: UiPath,
   tenantName: string,
@@ -243,37 +231,7 @@ export async function loadProcessSchedules(
     'Folders?$select=Id,Key,DisplayName,FullyQualifiedName&$orderby=FullyQualifiedName&$top=1000',
   )
   const folders = folderResponse.value ?? []
-  const settled = await Promise.allSettled(
-    folders.map(async (folder) => {
-      const scheduleResponse = await fetchOData<Record<string, unknown>>(
-        sdk,
-        selectedTenant.name,
-        `ProcessSchedules?$select=${selectedScheduleFields}&$orderby=Name&$top=1000`,
-        folder.Id,
-      )
-      const folderName = folder.FullyQualifiedName ?? folder.DisplayName ?? `Folder ${folder.Id}`
-      return (scheduleResponse.value ?? []).map((schedule) => ({
-        ...schedule,
-        folderId: folder.Id,
-        folderName,
-      })) as ProcessSchedule[]
-    }),
-  )
 
-  const schedules: ProcessSchedule[] = []
-  const failedFolders: Array<{ folder: Folder; message: string }> = []
-
-  settled.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      schedules.push(...result.value)
-      return
-    }
-
-    failedFolders.push({
-      folder: folders[index],
-      message: result.reason instanceof Error ? result.reason.message : String(result.reason),
-    })
-  })
-
+  const { schedules, failedFolders } = await loadProcessSchedulesPerFolder(sdk, selectedTenant.name, folders)
   return { failedFolders, folders, schedules, tenant: selectedTenant }
 }

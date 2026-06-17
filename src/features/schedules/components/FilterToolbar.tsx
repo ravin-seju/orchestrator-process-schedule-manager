@@ -18,7 +18,8 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { recurrenceBucketLabels, recurrenceLegend } from '../constants'
 import { buildFolderTree, type FolderTreeNode } from '../folderOptions'
 import type { Folder } from '../orchestrator'
-import type { StatusFilter, TriggerTypeFilter, WorkspaceView } from '../types'
+import type { MachineInventoryEntry, StatusFilter, TriggerTypeFilter, WorkspaceView } from '../types'
+import { V11_ENABLED } from '@/features/v11'
 
 const folderLabel = (folder: Folder) =>
   folder.FullyQualifiedName ?? folder.DisplayName ?? `Folder ${folder.Id}`
@@ -35,6 +36,12 @@ export function FilterToolbar({
   statusAwareFolders,
   triggerTypeFilter,
   workspaceView,
+  machines,
+  selectedMachineIds,
+  setSelectedMachineIds,
+  robotOptions,
+  selectedRobotIds,
+  setSelectedRobotIds,
 }: {
   query: string
   setQuery: (value: string) => void
@@ -47,12 +54,65 @@ export function FilterToolbar({
   statusAwareFolders: Folder[]
   triggerTypeFilter: TriggerTypeFilter
   workspaceView: WorkspaceView
+  machines?: MachineInventoryEntry[]
+  selectedMachineIds?: number[]
+  setSelectedMachineIds?: (ids: number[]) => void
+  robotOptions?: { id: number; name: string }[]
+  selectedRobotIds?: number[]
+  setSelectedRobotIds?: (ids: number[]) => void
 }) {
   const folderPopoverId = useId()
+  const machinePopoverId = useId()
+  const robotPopoverId = useId()
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false)
+  const [isMachinePickerOpen, setIsMachinePickerOpen] = useState(false)
+  const [isRobotPickerOpen, setIsRobotPickerOpen] = useState(false)
   const [folderOptionQuery, setFolderOptionQuery] = useState('')
   const [collapsedFolderPaths, setCollapsedFolderPaths] = useState<Set<string>>(() => new Set())
+  const [activeMachinesOnly, setActiveMachinesOnly] = useState(true)
   const selectedFolderIdSet = useMemo(() => new Set(selectedFolderIds), [selectedFolderIds])
+  const selectedMachineIdSet = useMemo(() => new Set(selectedMachineIds ?? []), [selectedMachineIds])
+  const selectedRobotIdSet = useMemo(() => new Set(selectedRobotIds ?? []), [selectedRobotIds])
+  const visibleMachines = useMemo(() => {
+    if (!machines) return []
+    const stateKnown = machines.some((m) => m.state !== 'Unknown')
+    return activeMachinesOnly && stateKnown
+      ? machines.filter((m) => m.state === 'Available' || m.state === 'Busy')
+      : machines
+  }, [machines, activeMachinesOnly])
+
+  const selectedMachineLabel = useMemo(() => {
+    if (!selectedMachineIds?.length) return 'All machines'
+    if (selectedMachineIds.length > 1) return `${selectedMachineIds.length} machines`
+    const m = machines?.find((x) => x.id === selectedMachineIds[0])
+    return m ? m.name : '1 machine'
+  }, [selectedMachineIds, machines])
+
+  const selectedRobotLabel = useMemo(() => {
+    if (!selectedRobotIds?.length) return 'All robots'
+    if (selectedRobotIds.length > 1) return `${selectedRobotIds.length} robots`
+    const r = robotOptions?.find((x) => x.id === selectedRobotIds[0])
+    return r ? r.name : '1 robot'
+  }, [selectedRobotIds, robotOptions])
+
+  const toggleMachine = (id: number) => {
+    if (!setSelectedMachineIds) return
+    setSelectedMachineIds(
+      selectedMachineIdSet.has(id)
+        ? (selectedMachineIds ?? []).filter((x) => x !== id)
+        : [...(selectedMachineIds ?? []), id],
+    )
+  }
+
+  const toggleRobot = (id: number) => {
+    if (!setSelectedRobotIds) return
+    setSelectedRobotIds(
+      selectedRobotIdSet.has(id)
+        ? (selectedRobotIds ?? []).filter((x) => x !== id)
+        : [...(selectedRobotIds ?? []), id],
+    )
+  }
+
   const normalizedFolderOptionQuery = folderOptionQuery.trim().toLowerCase()
   const filteredFolderOptions = useMemo(
     () =>
@@ -211,6 +271,126 @@ export function FilterToolbar({
           </div>
         </PopoverContent>
       </Popover>
+      {V11_ENABLED && machines !== undefined && setSelectedMachineIds !== undefined ? (
+        <Popover open={isMachinePickerOpen} onOpenChange={setIsMachinePickerOpen}>
+          <PopoverTrigger asChild>
+            <button
+              aria-controls={machinePopoverId}
+              aria-expanded={isMachinePickerOpen}
+              aria-haspopup="dialog"
+              aria-label="Machine filter"
+              className="folder-multiselect-trigger"
+              title={selectedMachineLabel}
+              type="button"
+            >
+              <span>{selectedMachineLabel}</span>
+              <ChevronDown size={15} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="folder-multiselect-content" id={machinePopoverId}>
+            <button
+              aria-pressed={activeMachinesOnly}
+              className={`folder-option-row ${activeMachinesOnly ? 'is-selected' : ''}`}
+              onClick={() => setActiveMachinesOnly((v) => !v)}
+              type="button"
+            >
+              <span className={`folder-option-check ${activeMachinesOnly ? 'is-checked' : ''}`} aria-hidden="true">
+                <Check size={11} strokeWidth={2.3} />
+              </span>
+              <span>Active only</span>
+            </button>
+            <button
+              aria-pressed={!selectedMachineIds?.length}
+              className={`folder-option-row ${!selectedMachineIds?.length ? 'is-selected' : ''}`}
+              onClick={() => setSelectedMachineIds([])}
+              type="button"
+            >
+              <span className={`folder-option-check ${!selectedMachineIds?.length ? 'is-checked' : ''}`} aria-hidden="true">
+                <Check size={11} strokeWidth={2.3} />
+              </span>
+              <span>All machines</span>
+            </button>
+            <div className="folder-option-list">
+              {visibleMachines.map((machine) => {
+                const checked = selectedMachineIdSet.has(machine.id)
+                const isActive = machine.state === 'Available' || machine.state === 'Busy'
+                return (
+                  <button
+                    aria-pressed={checked}
+                    className={`folder-option-row ${checked ? 'is-selected' : ''}`}
+                    key={machine.id}
+                    onClick={() => toggleMachine(machine.id)}
+                    type="button"
+                  >
+                    <span className={`folder-option-check ${checked ? 'is-checked' : ''}`} aria-hidden="true">
+                      <Check size={11} strokeWidth={2.3} />
+                    </span>
+                    <span className="machine-option-name">{machine.name}</span>
+                    <span
+                      className={`machine-status-dot ${isActive ? 'is-active' : 'is-inactive'}`}
+                      aria-label={machine.state}
+                      title={machine.state}
+                    />
+                  </button>
+                )
+              })}
+              {visibleMachines.length === 0 ? (
+                <p className="folder-option-empty">No machines available.</p>
+              ) : null}
+            </div>
+          </PopoverContent>
+        </Popover>
+      ) : null}
+      {V11_ENABLED && robotOptions !== undefined && setSelectedRobotIds !== undefined ? (
+        <Popover open={isRobotPickerOpen} onOpenChange={setIsRobotPickerOpen}>
+          <PopoverTrigger asChild>
+            <button
+              aria-controls={robotPopoverId}
+              aria-expanded={isRobotPickerOpen}
+              aria-haspopup="dialog"
+              aria-label="Robot filter"
+              className="folder-multiselect-trigger"
+              title={selectedRobotLabel}
+              type="button"
+            >
+              <span>{selectedRobotLabel}</span>
+              <ChevronDown size={15} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="folder-multiselect-content" id={robotPopoverId}>
+            <button
+              aria-pressed={!selectedRobotIds?.length}
+              className={`folder-option-row ${!selectedRobotIds?.length ? 'is-selected' : ''}`}
+              onClick={() => setSelectedRobotIds([])}
+              type="button"
+            >
+              <span className={`folder-option-check ${!selectedRobotIds?.length ? 'is-checked' : ''}`} aria-hidden="true">
+                <Check size={11} strokeWidth={2.3} />
+              </span>
+              <span>All robots</span>
+            </button>
+            <div className="folder-option-list">
+              {robotOptions.map((robot) => {
+                const checked = selectedRobotIdSet.has(robot.id)
+                return (
+                  <button
+                    aria-pressed={checked}
+                    className={`folder-option-row ${checked ? 'is-selected' : ''}`}
+                    key={robot.id}
+                    onClick={() => toggleRobot(robot.id)}
+                    type="button"
+                  >
+                    <span className={`folder-option-check ${checked ? 'is-checked' : ''}`} aria-hidden="true">
+                      <Check size={11} strokeWidth={2.3} />
+                    </span>
+                    <span>{robot.name}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </PopoverContent>
+        </Popover>
+      ) : null}
       <Select
         value={triggerTypeFilter}
         onValueChange={(value) => setTriggerTypeFilter(value as TriggerTypeFilter)}

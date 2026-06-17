@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Check, Copy, Edit3, Plus, RotateCcw, ShieldCheck, Trash2, X } from 'lucide-react'
+import { V11_ENABLED } from '@/features/v11'
 import {
   Dialog,
   DialogContent,
@@ -26,6 +27,7 @@ import type { StoredAuthConfig } from '../uipathConfig'
 
 type ConnectionFormState = {
   clientId: string
+  extendedScopes: boolean
   organization: string
   redirectUri: string
   tenants: string
@@ -34,6 +36,7 @@ type ConnectionFormState = {
 
 const emptyForm: ConnectionFormState = {
   clientId: '',
+  extendedScopes: false,
   organization: '',
   redirectUri: '',
   tenants: '',
@@ -79,6 +82,7 @@ function connectionToForm(config: StoredAuthConfig | null): ConnectionFormState 
 
   return {
     clientId: config.clientId,
+    extendedScopes: config.scope.includes('OR.Machines.Read'),
     organization: config.organization,
     redirectUri: config.urlAppRedirect,
     tenants: config.tenants.join(', '),
@@ -184,7 +188,9 @@ export function ConnectionManager({ compact = false }: { compact?: boolean }) {
         {
           clientId: form.clientId.trim(),
           name: '',
-          scope: REQUIRED_ORCHESTRATOR_SCOPE_TEXT,
+          scope: V11_ENABLED && form.extendedScopes
+            ? `${REQUIRED_ORCHESTRATOR_SCOPE_TEXT} OR.Machines.Read OR.Robots.Read`
+            : REQUIRED_ORCHESTRATOR_SCOPE_TEXT,
           urlAppRedirect: setupRedirectUri,
         },
       ],
@@ -506,6 +512,21 @@ export function ConnectionManager({ compact = false }: { compact?: boolean }) {
                     </div>
                     <CopyButton value={REQUIRED_ORCHESTRATOR_SCOPE_TEXT} label="Required access scopes" />
                   </div>
+                  {V11_ENABLED && (
+                    <div className="connection-setup-row connection-extended-scope-row">
+                      <label className="connection-extended-scope-toggle">
+                        <input
+                          type="checkbox"
+                          checked={form.extendedScopes}
+                          onChange={(e) => setForm((f) => ({ ...f, extendedScopes: e.target.checked }))}
+                        />
+                        <span>
+                          Request machine &amp; robot data
+                          <em> — requires OR.Machines.Read and OR.Robots.Read on your External App</em>
+                        </span>
+                      </label>
+                    </div>
+                  )}
                   <div className="connection-setup-row">
                     <span>Redirect URI</span>
                     <strong>{setupRedirectUri}</strong>

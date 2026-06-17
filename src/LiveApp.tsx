@@ -28,7 +28,7 @@ const friendlyAuthError = (message: string) => {
     normalizedMessage.includes('missing configured scope') ||
     normalizedMessage.includes('missing required scope')
   ) {
-    return null
+    return 'Your session is missing required permissions. Sign in again to refresh your access.'
   }
 
   return 'Sign-in could not be completed. Check the UiPath connection settings, then try again.'

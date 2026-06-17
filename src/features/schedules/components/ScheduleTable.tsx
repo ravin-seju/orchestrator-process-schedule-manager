@@ -144,7 +144,7 @@ export function ScheduleTable({
               const patternTitle = isQueue ? 'Queue-driven trigger — no time-based pattern' : patternLabel
 
               return (
-                <tr key={`${schedule.folderId}-${schedule.Id}`} style={folderAccentStyle(schedule.folderId)}>
+                <tr key={`${schedule.folderId}-${schedule.Id}`} style={folderAccentStyle(schedule.folderName)}>
                   <td className="table-number">{formatNumber(index + 1)}</td>
                   <td className="table-name" title={schedule.Name}>{schedule.Name}</td>
                   <td className="table-process" title={processLabel}>{processLabel}</td>

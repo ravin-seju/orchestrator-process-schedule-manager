@@ -172,7 +172,7 @@ describe('App auth routing', () => {
 
     expect(await screen.findByLabelText('Saved UiPath connection')).toBeInTheDocument()
     expect(screen.getByText('ravinseju')).toBeInTheDocument()
-    expect(screen.getByText('https://staging.uipath.com')).toBeInTheDocument()
+    expect(screen.getByText('Staging')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Manage Connection' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Add Connection/i })).not.toBeInTheDocument()
