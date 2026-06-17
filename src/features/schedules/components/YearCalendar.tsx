@@ -1,6 +1,6 @@
 import { memo } from 'react'
-import { recurrenceAccentStyle, yearDayTitle } from '../calendarDisplay'
-import { recurrenceBucketLabels, weekdayLabels, yearMonthFormatter } from '../constants'
+import { folderColorVars, yearDayTitle } from '../calendarDisplay'
+import { weekdayLabels, yearMonthFormatter } from '../constants'
 import { formatNumber } from '../formatters'
 import {
   dateKey,
@@ -63,8 +63,8 @@ export const YearCalendar = memo(function YearCalendar({
                         {items.slice(0, 3).map((item) => (
                           <i
                             key={item.id}
-                            title={recurrenceBucketLabels[item.bucket]}
-                            style={recurrenceAccentStyle(item.bucket)}
+                            title={item.schedule.folderName}
+                            style={folderColorVars(item.schedule.folderName)}
                           />
                         ))}
                         {items.length > 3 ? <b>+{formatNumber(items.length - 3)}</b> : null}

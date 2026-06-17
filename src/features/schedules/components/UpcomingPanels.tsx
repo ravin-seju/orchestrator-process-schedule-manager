@@ -1,10 +1,9 @@
 import { X } from 'lucide-react'
 import {
   classifyRecurrenceBucket,
-  folderAccentStyle,
+  folderColorVars,
   groupAccentStyle,
   groupOccurrencesBySchedule,
-  recurrenceAccentStyle,
 } from '../calendarDisplay'
 import { maxDetailTimeChips, maxHighFrequencyDetailTimeChips, recurrenceBucketLabels } from '../constants'
 import { formatNumber } from '../formatters'
@@ -119,10 +118,7 @@ export function DayDetailsPanel({
               <section
                 className="day-detail-group"
                 key={group.key}
-                style={{
-                  ...folderAccentStyle(group.schedule.folderId),
-                  ...recurrenceAccentStyle(bucket),
-                }}
+                style={folderColorVars(group.schedule.folderName)}
               >
                 <div className="day-detail-group-heading">
                   <div>

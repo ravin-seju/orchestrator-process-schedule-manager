@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   Copy,
   Folder,
-  ShieldAlert,
   Zap,
 } from 'lucide-react'
 import {
@@ -26,7 +25,6 @@ import {
   viewModeStorageKey,
   weekVisibleSpanRows,
 } from './constants'
-import { formatNumber } from './formatters'
 import {
   readInitialViewMode,
 } from './calendarDisplay'
@@ -255,25 +253,7 @@ function Dashboard({
     duplicates: 'Duplicates only',
     stale: 'Stale only',
   }
-  const failedFolderNames = useMemo(
-    () =>
-      data?.failedFolders
-        .slice(0, 4)
-        .map((failure) => failure.folder.FullyQualifiedName ?? failure.folder.DisplayName ?? `Folder ${failure.folder.Id}`)
-        .join(', ') ?? '',
-    [data?.failedFolders],
-  )
-  const selectedFailedFolderIds = new Set(selectedFolderIds)
-  const selectedFailedFolder =
-    selectedFailedFolderIds.size > 0
-      ? data?.failedFolders.find((failure) => selectedFailedFolderIds.has(String(failure.folder.Id)))
-      : undefined
-  const hasNotices = Boolean(
-    tenantError ||
-      loadError ||
-      data?.failedFolders.length ||
-      selectedFailedFolder,
-  )
+  const hasNotices = Boolean(tenantError || loadError)
   const headerFilterChips = [
     trimmedQuery
       ? {
@@ -404,27 +384,6 @@ function Dashboard({
         <section className="notice-stack" aria-label="Sync notices">
           {tenantError ? <div className="notice warning">Tenant list fallback active: {tenantError}</div> : null}
           {loadError ? <div className="notice error">Error: {loadError}</div> : null}
-          {data?.failedFolders.length ? (
-            <div className="notice warning">
-              <ShieldAlert size={18} aria-hidden="true" />
-              <span>
-                {formatNumber(data.failedFolders.length)} folder{data.failedFolders.length === 1 ? '' : 's'} could not be read
-                because the app is missing trigger-view access
-                {failedFolderNames ? `: ${failedFolderNames}${data.failedFolders.length > 4 ? ', ...' : ''}` : ''}.
-              </span>
-            </div>
-          ) : null}
-          {selectedFailedFolder ? (
-            <div className="notice warning">
-              <ShieldAlert size={18} aria-hidden="true" />
-              <span>
-                {selectedFailedFolder.folder.FullyQualifiedName ??
-                  selectedFailedFolder.folder.DisplayName ??
-                  `Folder ${selectedFailedFolder.folder.Id}`}{' '}
-                returned: {selectedFailedFolder.message}
-              </span>
-            </div>
-          ) : null}
         </section>
       ) : null}
 

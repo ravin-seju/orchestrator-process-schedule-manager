@@ -30,7 +30,21 @@ import type {
   ViewMode,
 } from './types'
 
-const FOLDER_PALETTE_SIZE = 7
+const rootFolderName = (folderName: string): string =>
+  (folderName.split('/')[0] ?? folderName).trim() || folderName
+
+// djb2-style string hash → hue 0..359, deterministic per root folder name
+const hashHue = (name: string): number => {
+  let h = 5381
+  for (let i = 0; i < name.length; i += 1) h = ((h << 5) + h + name.charCodeAt(i)) >>> 0
+  return h % 360
+}
+
+export const folderColorVars = (folderName: string): CSSProperties => {
+  const hue = hashHue(rootFolderName(folderName))
+  const accent = `hsl(${hue} 62% 55%)`
+  return { '--folder-accent': accent, '--bucket-accent': accent } as CSSProperties
+}
 
 export const buildScheduleSearchIndex = (schedules: ProcessSchedule[]): ScheduleSearchEntry[] =>
   schedules.map((schedule) => ({
@@ -50,12 +64,7 @@ export const buildScheduleSearchIndex = (schedules: ProcessSchedule[]): Schedule
 
 export const isTestingPath = (pathname: string) => pathname.replace(/\/+$/, '').endsWith('/testing')
 
-export const folderAccentStyle = (folderId: number): CSSProperties => {
-  const idx = (Math.abs(folderId) % FOLDER_PALETTE_SIZE) + 1
-  return {
-    '--folder-accent': `var(--folder-${idx}-accent)`,
-  } as CSSProperties
-}
+export const folderAccentStyle = (folderName: string): CSSProperties => folderColorVars(folderName)
 
 export const scheduleKey = (schedule: ProcessSchedule) => `${schedule.folderId}-${schedule.Id}`
 
@@ -170,10 +179,8 @@ export const recurrenceAccentStyle = (bucket: RecurrenceBucket): CSSProperties =
     '--bucket-soft': `var(--bucket-${bucket}-soft)`,
   }) as CSSProperties
 
-export const groupAccentStyle = (group: ProcessDayGroup): CSSProperties => ({
-  ...folderAccentStyle(group.schedule.folderId),
-  ...recurrenceAccentStyle(group.bucket),
-})
+export const groupAccentStyle = (group: ProcessDayGroup): CSSProperties =>
+  folderColorVars(group.schedule.folderName)
 
 const occurrenceMinuteOfDay = (date: Date) => date.getHours() * 60 + date.getMinutes()
 const compareOccurrences = (a: ScheduleOccurrence, b: ScheduleOccurrence) => a.date.getTime() - b.date.getTime()

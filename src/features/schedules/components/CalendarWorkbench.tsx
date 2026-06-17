@@ -16,12 +16,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import {
-  recurrenceAccentStyle,
-} from '../calendarDisplay'
-import {
   monthSpanLaneStepPx,
-  recurrenceBucketLabels,
-  recurrenceLegend,
   viewModeDescriptions,
   viewModeLabels,
   viewModes,
@@ -180,31 +175,6 @@ export const CalendarWorkbench = memo(function CalendarWorkbench({
               >
                 <ChevronRight size={12} strokeWidth={1.5} aria-hidden="true" />
               </button>
-              <span aria-hidden="true">·</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    className="legend-badge"
-                    aria-label="Recurrence color legend"
-                    type="button"
-                  >
-                    <span className="legend-label">Legend</span>
-                    <span className="legend-dot-strip" aria-hidden="true">
-                      {recurrenceLegend.map((bucket) => (
-                        <i key={bucket} style={recurrenceAccentStyle(bucket)} />
-                      ))}
-                    </span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent className="legend-tooltip-content" align="start">
-                  {recurrenceLegend.map((bucket) => (
-                    <span className="legend-tooltip-row" key={bucket}>
-                      <i aria-hidden="true" style={recurrenceAccentStyle(bucket)} />
-                      <span>{recurrenceBucketLabels[bucket]}</span>
-                    </span>
-                  ))}
-                </TooltipContent>
-              </Tooltip>
             </div>
           </div>
           <div className="calendar-toolbar-actions">
