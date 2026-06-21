@@ -14,7 +14,7 @@ dist-ssr
 .env.local
 *.local
 CLAUDE.md
-docs/HANDOFF-*.md
+docs/*
 
 # Editor directories and files
 .vscode/*
