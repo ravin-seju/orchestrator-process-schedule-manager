@@ -32,3 +32,6 @@ orchestrator-swagger.json
 
 # Playwright MCP probe output (may contain tenant PII)
 .playwright-mcp/*
+
+# Local handoff / working docs (not part of the app)
+docs/
