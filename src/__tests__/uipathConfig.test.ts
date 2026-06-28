@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  acknowledgeScopeGroup,
   addCustomAuthConfig,
   buildOAuthConfig,
   getAvailableAuthConfigs,
@@ -9,6 +10,7 @@ import {
   getDefaultRedirectUri,
   getMissingRequiredScopes,
   getSelectedAuthConfigId,
+  isScopeAcknowledged,
   REQUIRED_ORCHESTRATOR_SCOPE_TEXT,
   resetCustomAuthConfigs,
   setSelectedAuthConfigId,
@@ -212,7 +214,22 @@ describe('UiPath connection config', () => {
   })
 
   it('detects missing required Orchestrator scopes from legacy saved configs', () => {
-    expect(getMissingRequiredScopes('OR.Folders.Read OR.Execution.Read')).toEqual(['OR.Jobs.Read'])
+    expect(getMissingRequiredScopes('OR.Folders.Read OR.Execution.Read')).toEqual([
+      'OR.Jobs.Read',
+      'OR.Machines.Read',
+      'OR.Robots.Read',
+    ])
     expect(getMissingRequiredScopes(REQUIRED_ORCHESTRATOR_SCOPE_TEXT)).toEqual([])
+  })
+
+  it('records per-group scope acknowledgment and clears it on reset', () => {
+    expect(isScopeAcknowledged('group-a')).toBe(false)
+
+    acknowledgeScopeGroup('group-a')
+    expect(isScopeAcknowledged('group-a')).toBe(true)
+    expect(isScopeAcknowledged('group-b')).toBe(false)
+
+    resetCustomAuthConfigs()
+    expect(isScopeAcknowledged('group-a')).toBe(false)
   })
 })

@@ -32,26 +32,43 @@ const findCollisionSet = (
   windowStart: Date,
   windowEnd: Date,
   machineScope?: Set<number>,
+  robotScope?: Set<number>,
+  scheduleMachineIds?: Map<number, number[]>,
 ): Set<ProcessSchedule> => {
-  const scoped = machineScope != null && machineScope.size > 0
+  const scopedMachine = machineScope != null && machineScope.size > 0
+  const scopedRobot = robotScope != null && robotScope.size > 0
+  const scoped = scopedMachine || scopedRobot
+  // Machine identity comes from job history (scheduleMachineIds) when provided —
+  // the actual runtime machine — otherwise from the schedule's configured MachineRobots.
+  const machineIdsOf = (s: ProcessSchedule): number[] =>
+    scheduleMachineIds ? (scheduleMachineIds.get(s.Id) ?? []) : getAssignedMachineIds(s)
   const slots = new Map<string, Set<ProcessSchedule>>()
   for (const schedule of schedules) {
     if (!schedule.Enabled) continue
     if (isQueueTrigger(schedule)) continue
 
-    const scopedIds = scoped
-      ? getAssignedMachineIds(schedule).filter((id) => machineScope!.has(id))
+    // When a machine/robot filter is active, partition collisions per resource:
+    // a schedule only collides with others sharing the same machine OR robot.
+    const scopeKeys = scoped
+      ? [
+          ...(scopedMachine
+            ? machineIdsOf(schedule).filter((id) => machineScope!.has(id)).map((id) => `m${id}`)
+            : []),
+          ...(scopedRobot
+            ? getAssignedRobotIds(schedule).filter((id) => robotScope!.has(id)).map((id) => `r${id}`)
+            : []),
+        ]
       : null
-    // When machine filter is active, skip schedules not allocated to any selected machine
-    if (scoped && scopedIds!.length === 0) continue
+    // Skip schedules not allocated to any selected machine/robot
+    if (scoped && scopeKeys!.length === 0) continue
 
     const occurrences = getCachedScheduleOccurrences(schedule, windowStart, windowEnd)
     for (const occ of occurrences) {
       const d = occ.date
       const tsKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}-${d.getMinutes()}`
       if (scoped) {
-        for (const machineId of scopedIds!) {
-          const key = `${machineId}-${tsKey}`
+        for (const scopeKey of scopeKeys!) {
+          const key = `${scopeKey}-${tsKey}`
           const set = slots.get(key) ?? new Set<ProcessSchedule>()
           set.add(schedule)
           slots.set(key, set)
@@ -75,6 +92,8 @@ export const applyAttentionFilter = (
   matches: ProcessSchedule[],
   attentionFilter: AttentionFilter,
   machineScope?: Set<number>,
+  robotScope?: Set<number>,
+  scheduleMachineIds?: Map<number, number[]>,
 ): ProcessSchedule[] => {
   if (attentionFilter === 'none') return matches
 
@@ -92,7 +111,7 @@ export const applyAttentionFilter = (
     const start = new Date()
     start.setHours(0, 0, 0, 0)
     const end = new Date(start.getTime() + COLLISION_WINDOW_MS)
-    const colliding = findCollisionSet(matches, start, end, machineScope)
+    const colliding = findCollisionSet(matches, start, end, machineScope, robotScope, scheduleMachineIds)
     return matches.filter((s) => colliding.has(s))
   }
 
@@ -103,6 +122,8 @@ export function useScheduleFilters({
   attentionFilter,
   query,
   schedules,
+  scheduleMachineIds,
+  collisionMachineIds,
   selectedFolderIds,
   selectedMachineIds = [],
   selectedRobotIds = [],
@@ -112,6 +133,8 @@ export function useScheduleFilters({
   attentionFilter: AttentionFilter
   query: string
   schedules: ProcessSchedule[]
+  scheduleMachineIds?: Map<number, number[]>
+  collisionMachineIds?: Map<number, number[]>
   selectedFolderIds: string[]
   selectedMachineIds?: number[]
   selectedRobotIds?: number[]
@@ -135,6 +158,10 @@ export function useScheduleFilters({
     return measurePerformance('schedule filters', () => {
       const matches: ProcessSchedule[] = []
       const selectedFolderIdSet = new Set(selectedFolderIds)
+      // Machine identity from job history when available (actual runtime machine),
+      // else the schedule's configured MachineRobots.
+      const machineIdsOf = (s: ProcessSchedule): number[] =>
+        scheduleMachineIds ? (scheduleMachineIds.get(s.Id) ?? []) : getAssignedMachineIds(s)
       for (const { schedule, searchText } of scheduleSearchIndex) {
         const matchesStatus =
           statusFilter === 'all' ||
@@ -146,7 +173,7 @@ export function useScheduleFilters({
           triggerTypeFilter === 'all' || classifyRecurrenceBucket(schedule) === triggerTypeFilter
         const matchesMachine =
           !selectedMachineIdSet.size ||
-          getAssignedMachineIds(schedule).some((id) => selectedMachineIdSet.has(id))
+          machineIdsOf(schedule).some((id) => selectedMachineIdSet.has(id))
         const matchesRobot =
           !selectedRobotIdSet.size ||
           getAssignedRobotIds(schedule).some((id) => selectedRobotIdSet.has(id))
@@ -171,6 +198,7 @@ export function useScheduleFilters({
   }, [
     normalizedQuery,
     scheduleSearchIndex,
+    scheduleMachineIds,
     selectedFolderIds,
     selectedMachineIdSet,
     selectedRobotIdSet,
@@ -179,8 +207,8 @@ export function useScheduleFilters({
   ])
 
   const filteredSchedules = useMemo(
-    () => applyAttentionFilter(preAttentionSchedules, attentionFilter, selectedMachineIdSet),
-    [preAttentionSchedules, attentionFilter, selectedMachineIdSet],
+    () => applyAttentionFilter(preAttentionSchedules, attentionFilter, selectedMachineIdSet, selectedRobotIdSet, collisionMachineIds ?? scheduleMachineIds),
+    [preAttentionSchedules, attentionFilter, selectedMachineIdSet, selectedRobotIdSet, collisionMachineIds, scheduleMachineIds],
   )
 
   return { filteredSchedules, preAttentionSchedules, trimmedQuery }

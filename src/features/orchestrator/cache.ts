@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v2'
+const CACHE_VERSION = 'v6'
 const NS = `process-schedule-manager.cache.${CACHE_VERSION}`
 
 // Soft TTL → data is served but flagged stale (triggers background revalidation).
@@ -56,12 +56,6 @@ export function cacheGetEntry<T>(key: string): CacheLookup<T> | null {
   } catch {
     return null
   }
-}
-
-/** Fresh-only read. Returns data only while still within the soft (stale) TTL. */
-export function cacheGet<T>(key: string): T | null {
-  const entry = cacheGetEntry<T>(key)
-  return entry && !entry.isStale ? entry.data : null
 }
 
 export function cacheSet<T>(key: string, data: T, ttl: number | TtlOptions): void {

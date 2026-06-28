@@ -1,5 +1,5 @@
 import type { Folder, LoadSchedulesResult, ProcessSchedule, TenantInfo } from './orchestrator'
-import type { MachineInventoryEntry, RuntimeStats, StressScheduleCount } from './types'
+import type { RuntimeStats, StressScheduleCount } from './types'
 
 export const stressScheduleCounts = [5, 10, 50, 100] as const
 export const defaultStressScheduleCount: StressScheduleCount = 5
@@ -165,20 +165,36 @@ const buildScheduleTiming = (bucket: StressBucket, index: number) => {
 type MachineRobotEntry = Required<ProcessSchedule>['MachineRobots'][number]
 
 const stressMachinePool: MachineRobotEntry[] = [
-  { MachineId: 501, MachineName: 'ROBOT-VM-01', RobotId: 201, RobotName: 'Bot.Alpha' },
-  { MachineId: 502, MachineName: 'ROBOT-VM-02', RobotId: 202, RobotName: 'Bot.Beta' },
-  { MachineId: 503, MachineName: 'ROBOT-VM-03', RobotId: 203, RobotName: 'Bot.Gamma' },
-  { MachineId: 504, MachineName: 'ROBOT-VM-04', RobotId: 204, RobotName: 'Bot.Delta' },
+  { MachineId: 501, MachineName: 'ROBOT-VM-01', RobotId: 201, RobotUserName: 'Bot.Alpha', SessionId: 901, SessionName: 'ROBOT-VM-01' },
+  { MachineId: 502, MachineName: 'ROBOT-VM-02', RobotId: 202, RobotUserName: 'Bot.Beta', SessionId: 902, SessionName: 'ROBOT-VM-02' },
+  { MachineId: 503, MachineName: 'ROBOT-VM-03', RobotId: 203, RobotUserName: 'Bot.Gamma', SessionId: 903, SessionName: 'ROBOT-VM-03' },
+  { MachineId: 504, MachineName: 'ROBOT-VM-04', RobotId: 204, RobotUserName: 'Bot.Delta', SessionId: 904, SessionName: 'ROBOT-VM-04' },
 ]
 
-export const stressMachineInventory: MachineInventoryEntry[] = [
-  { id: 501, name: 'ROBOT-VM-01', type: 'Standard', state: 'Available', lastReportingTime: new Date(Date.now() - 60_000).toISOString() },
-  { id: 502, name: 'ROBOT-VM-02', type: 'Standard', state: 'Available', lastReportingTime: new Date(Date.now() - 30_000).toISOString() },
-  { id: 503, name: 'ROBOT-VM-03', type: 'Standard', state: 'Busy', lastReportingTime: new Date(Date.now() - 15_000).toISOString() },
-  { id: 504, name: 'ROBOT-VM-04', type: 'Standard', state: 'Disconnected', lastReportingTime: new Date(Date.now() - 5 * 60_000).toISOString() },
-  { id: 505, name: 'ROBOT-VM-05', type: 'Unattended', state: 'Unresponsive', lastReportingTime: new Date(Date.now() - 20 * 60_000).toISOString() },
-  { id: 506, name: 'ROBOT-VM-06', type: 'Unattended', state: 'Unknown', lastReportingTime: null },
-]
+// Jobs-derived runtime maps for the testing route — mirror what useJobRuntimes returns live.
+// Machine key = the pool MachineId (501-504); the schedule→machine assignment mirrors
+// buildProcessSchedule / showcaseScheduleBase so the picker, metrics, and columns populate.
+export const stressMachineNames = new Map<number, string>(
+  stressMachinePool.map((m) => [m.MachineId as number, m.MachineName as string]),
+)
+export const stressRobotNames = new Map<number, string>(
+  stressMachinePool.map((m) => [m.RobotId as number, m.RobotUserName as string]),
+)
+const stressMachineKeysForIndex = (index: number): number[] => {
+  const primary = 501 + (index % stressMachinePool.length)
+  return index % 5 === 0 && index > 0
+    ? [primary, 501 + ((index + 1) % stressMachinePool.length)]
+    : [primary]
+}
+export const stressScheduleMachineIds: Map<number, number[]> = (() => {
+  const map = new Map<number, number[]>()
+  for (let i = 0; i < 200; i += 1) map.set(90000 + i, stressMachineKeysForIndex(i))
+  for (const id of [95001, 95002, 95003, 95004, 95005]) {
+    map.set(id, [501 + (id % stressMachinePool.length)])
+  }
+  return map
+})()
+export const stressReleaseMachineIds = new Map<number, number[]>()
 
 const buildStressRuntimeStats = (): Map<number, RuntimeStats> => {
   const stats = new Map<number, RuntimeStats>()
@@ -255,7 +271,6 @@ export const createStressScheduleData = (count: StressScheduleCount): LoadSchedu
     tenant,
     folders: stressFolders,
     schedules: [...showcase, ...generated],
-    failedFolders: [],
   }
 }
 

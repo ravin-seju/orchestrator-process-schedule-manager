@@ -95,12 +95,9 @@ export type SelectedDayDetail = {
   startMinute?: number
 }
 
-export interface MachineInventoryEntry {
+export interface MachineOption {
   id: number
   name: string
-  type: string
-  state: 'Available' | 'Busy' | 'Disconnected' | 'Unresponsive' | 'Unknown'
-  lastReportingTime: string | null
 }
 
 export interface RuntimeStats {

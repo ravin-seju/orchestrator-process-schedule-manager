@@ -1,15 +1,20 @@
 import { X } from 'lucide-react'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   classifyRecurrenceBucket,
   folderColorVars,
   groupAccentStyle,
   groupOccurrencesBySchedule,
 } from '../calendarDisplay'
-import { maxDetailTimeChips, maxHighFrequencyDetailTimeChips, recurrenceBucketLabels } from '../constants'
+import { maxDetailTimeChips, maxHighFrequencyDetailTimeChips, maxInlineDetailMachines, recurrenceBucketLabels } from '../constants'
 import { formatNumber } from '../formatters'
-import { shortDateLabel, timeLabel } from '../scheduleUtils'
+import { resolveMachineNames, resolveRobotNames, shortDateLabel, timeLabel } from '../scheduleUtils'
 import type { ScheduleOccurrence } from '../scheduleUtils'
-import type { ProcessDayGroup, SelectedDayDetail, UpcomingDisplayItem } from '../types'
+import type { ProcessDayGroup, RuntimeStats, SelectedDayDetail, UpcomingDisplayItem } from '../types'
 
 const scopedDetailTitle = (selectedDay: SelectedDayDetail) => {
   if (selectedDay.scope === 'schedule' || selectedDay.scheduleKey) return 'Trigger Details'
@@ -47,6 +52,8 @@ const scopedDetailContext = (selectedDay: SelectedDayDetail) => {
   return dateLabel
 }
 
+const runtimeMinutes = (seconds: number) => Math.max(1, Math.ceil(seconds / 60))
+
 export function UpcomingPill({
   item,
   onOpen,
@@ -58,21 +65,25 @@ export function UpcomingPill({
   const timingLabel = item.runCount > 1 ? `Next ${item.firstOccurrence.timeLabel}` : item.firstOccurrence.timeLabel
 
   return (
-    <button
-      className={`upcoming-item ${schedule.Enabled ? '' : 'is-disabled'}`}
-      onClick={() => onOpen(item)}
-      style={groupAccentStyle(item)}
-      type="button"
-      title={`Show exact runs for ${schedule.Name}`}
-    >
-      <div className="upcoming-copy">
-        <h3>{schedule.Name}</h3>
-        <p>
-          {item.bucketLabel} · {schedule.folderName}
-        </p>
-      </div>
-      <time className="upcoming-time">{timingLabel}</time>
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className={`upcoming-item ${schedule.Enabled ? '' : 'is-disabled'}`}
+          onClick={() => onOpen(item)}
+          style={groupAccentStyle(item)}
+          type="button"
+        >
+          <div className="upcoming-copy">
+            <h3>{schedule.Name}</h3>
+            <p>
+              {item.bucketLabel} · {schedule.folderName}
+            </p>
+          </div>
+          <time className="upcoming-time">{timingLabel}</time>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{`Show exact runs for ${schedule.Name}`}</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -80,11 +91,26 @@ export function DayDetailsPanel({
   selectedDay,
   occurrences,
   onClose,
+  runtimeStats,
+  robotNames,
+  machineNames,
+  scheduleMachineIds,
 }: {
   selectedDay: SelectedDayDetail
   occurrences: ScheduleOccurrence[]
   onClose: () => void
+  runtimeStats?: Map<number, RuntimeStats>
+  robotNames?: Map<number, string>
+  machineNames?: Map<number, string>
+  scheduleMachineIds?: Map<number, number[]>
 }) {
+  // Run info (stats + robot/machine) renders when its maps are present; SchedulePlanner
+  // supplies them, so any map being present signals there is run info to show.
+  const showRunInfo =
+    runtimeStats !== undefined ||
+    robotNames !== undefined ||
+    machineNames !== undefined ||
+    scheduleMachineIds !== undefined
   const groups = groupOccurrencesBySchedule(occurrences).sort((a, b) => {
     if (a.key === selectedDay.scheduleKey) return -1
     if (b.key === selectedDay.scheduleKey) return 1
@@ -113,6 +139,12 @@ export function DayDetailsPanel({
               bucket === 'minute' || bucket === 'hourly' ? maxHighFrequencyDetailTimeChips : maxDetailTimeChips
             const visibleOccurrences = group.occurrences.slice(0, visibleTimeLimit)
             const hiddenOccurrenceCount = Math.max(0, group.occurrences.length - visibleOccurrences.length)
+            const timeZone = group.schedule.TimeZoneIana ?? group.schedule.TimeZoneId
+            const stats = showRunInfo ? runtimeStats?.get(group.schedule.Id) : undefined
+            const robots = showRunInfo ? resolveRobotNames(group.schedule, robotNames) : []
+            const groupMachines = showRunInfo
+              ? resolveMachineNames(group.schedule.Id, scheduleMachineIds, machineNames)
+              : []
 
             return (
               <section
@@ -126,6 +158,44 @@ export function DayDetailsPanel({
                     <p>{recurrenceBucketLabels[bucket]} · {group.schedule.folderName}</p>
                   </div>
                 </div>
+                {timeZone || showRunInfo ? (
+                  <div className="day-detail-meta">
+                    {timeZone ? <p>Time zone: {timeZone}</p> : null}
+                    {showRunInfo ? (
+                      stats ? (
+                        <>
+                          <p>
+                            Runtime · based on {formatNumber(stats.sampleSize)} runs
+                          </p>
+                          <p className="day-detail-meta-sub">
+                            Typical {runtimeMinutes(stats.medianSec)}m · Worst case (p90){' '}
+                            {runtimeMinutes(stats.p90Sec)}m
+                          </p>
+                        </>
+                      ) : (
+                        <p>No recent run history</p>
+                      )
+                    ) : null}
+                    {robots.length ? <p>Robot: {robots.join(', ')}</p> : null}
+                    {groupMachines.length ? (
+                      <p>
+                        Machine:{' '}
+                        {groupMachines.length > maxInlineDetailMachines ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button className="day-detail-meta-more" type="button">
+                                {formatNumber(groupMachines.length)} machines (dynamic pool)
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>{groupMachines.join(', ')}</TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          groupMachines.join(', ')
+                        )}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="time-chip-list">
                   {visibleOccurrences.map((occurrence) => (
                     <span key={`${occurrence.id}-detail`}>{occurrence.timeLabel}</span>

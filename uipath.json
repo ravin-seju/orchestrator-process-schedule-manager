@@ -1,4 +1,4 @@
 {
-  "scope": "OR.Folders.Read OR.Execution.Read OR.Jobs.Read",
+  "scope": "OR.Folders.Read OR.Execution.Read OR.Jobs.Read OR.Machines.Read OR.Robots.Read",
   "clientId": ""
 }

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useLayoutEffect } from 'react'
 import { BrandLockup } from './components/BrandLockup'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { TooltipProvider } from './components/ui/tooltip'
 
 const LiveApp = lazy(() => import('./LiveApp'))
 const TestingApp =
@@ -63,9 +64,11 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <Suspense fallback={<LoadingAppShell />}>
-        {TestingApp && isTesting ? <TestingApp /> : isTesting ? <TestingUnavailable /> : <LiveApp />}
-      </Suspense>
+      <TooltipProvider delayDuration={200} skipDelayDuration={300}>
+        <Suspense fallback={<LoadingAppShell />}>
+          {TestingApp && isTesting ? <TestingApp /> : isTesting ? <TestingUnavailable /> : <LiveApp />}
+        </Suspense>
+      </TooltipProvider>
     </ErrorBoundary>
   )
 }

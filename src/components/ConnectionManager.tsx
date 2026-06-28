@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
 import { Check, Copy, Edit3, Plus, RotateCcw, ShieldCheck, Trash2, X } from 'lucide-react'
-import { V11_ENABLED } from '@/features/v11'
 import {
   Dialog,
   DialogContent,
@@ -14,6 +13,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { getEnvironmentDisplayLabel } from '../features/schedules/constants'
 import { useAuth } from '../hooks/useAuth'
 import {
@@ -27,7 +31,6 @@ import type { StoredAuthConfig } from '../uipathConfig'
 
 type ConnectionFormState = {
   clientId: string
-  extendedScopes: boolean
   organization: string
   redirectUri: string
   tenants: string
@@ -36,7 +39,6 @@ type ConnectionFormState = {
 
 const emptyForm: ConnectionFormState = {
   clientId: '',
-  extendedScopes: false,
   organization: '',
   redirectUri: '',
   tenants: '',
@@ -55,15 +57,19 @@ function CopyButton({ value, label }: { value: string; label: string }) {
     }
   }
   return (
-    <button
-      type="button"
-      className="connection-setup-copy"
-      onClick={handleCopy}
-      aria-label={copied ? `${label} copied` : `Copy ${label}`}
-      title={copied ? 'Copied' : 'Copy'}
-    >
-      {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="connection-setup-copy"
+          onClick={handleCopy}
+          aria-label={copied ? `${label} copied` : `Copy ${label}`}
+        >
+          {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{copied ? 'Copied' : 'Copy'}</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -82,7 +88,6 @@ function connectionToForm(config: StoredAuthConfig | null): ConnectionFormState 
 
   return {
     clientId: config.clientId,
-    extendedScopes: config.scope.includes('OR.Machines.Read'),
     organization: config.organization,
     redirectUri: config.urlAppRedirect,
     tenants: config.tenants.join(', '),
@@ -188,9 +193,7 @@ export function ConnectionManager({ compact = false }: { compact?: boolean }) {
         {
           clientId: form.clientId.trim(),
           name: '',
-          scope: V11_ENABLED && form.extendedScopes
-            ? `${REQUIRED_ORCHESTRATOR_SCOPE_TEXT} OR.Machines.Read OR.Robots.Read`
-            : REQUIRED_ORCHESTRATOR_SCOPE_TEXT,
+          scope: REQUIRED_ORCHESTRATOR_SCOPE_TEXT,
           urlAppRedirect: setupRedirectUri,
         },
       ],
@@ -317,15 +320,19 @@ export function ConnectionManager({ compact = false }: { compact?: boolean }) {
               {isSelectedActive ? 'Active' : 'Switch'}
             </button>
             {canDeleteSelectedConnection && selectedPendingConnection ? (
-              <button
-                aria-label="Delete selected connection"
-                className="icon-button connection-delete-button"
-                onClick={() => setConfirmingDeleteConnection(selectedPendingConnection)}
-                title="Delete selected connection"
-                type="button"
-              >
-                <Trash2 size={14} aria-hidden="true" />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-label="Delete selected connection"
+                    className="icon-button connection-delete-button"
+                    onClick={() => setConfirmingDeleteConnection(selectedPendingConnection)}
+                    type="button"
+                  >
+                    <Trash2 size={14} aria-hidden="true" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Delete selected connection</TooltipContent>
+              </Tooltip>
             ) : null}
           </div>
           {selectedPendingConnection ? (
@@ -512,21 +519,6 @@ export function ConnectionManager({ compact = false }: { compact?: boolean }) {
                     </div>
                     <CopyButton value={REQUIRED_ORCHESTRATOR_SCOPE_TEXT} label="Required access scopes" />
                   </div>
-                  {V11_ENABLED && (
-                    <div className="connection-setup-row connection-extended-scope-row">
-                      <label className="connection-extended-scope-toggle">
-                        <input
-                          type="checkbox"
-                          checked={form.extendedScopes}
-                          onChange={(e) => setForm((f) => ({ ...f, extendedScopes: e.target.checked }))}
-                        />
-                        <span>
-                          Request machine &amp; robot data
-                          <em> — requires OR.Machines.Read and OR.Robots.Read on your External App</em>
-                        </span>
-                      </label>
-                    </div>
-                  )}
                   <div className="connection-setup-row">
                     <span>Redirect URI</span>
                     <strong>{setupRedirectUri}</strong>

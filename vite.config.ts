@@ -36,7 +36,6 @@ export default defineConfig({
   },
   test: {
     env: {
-      VITE_ENABLE_V11: 'false',
       VITE_ENABLE_TESTING_ROUTE: 'false',
     },
   },

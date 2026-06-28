@@ -1,5 +1,10 @@
 import type { CSSProperties } from 'react'
 import { memo, useMemo } from 'react'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { formatRunCount } from '../formatters'
 import {
   buildDensitySegments,
@@ -44,21 +49,25 @@ export const ProcessTimelineRow = memo(function ProcessTimelineRow({
   const rowModeClass = `mode-${viewMode}`
 
   return (
-    <button
-      className={`process-row ${rowModeClass} ${compact ? 'compact' : ''} ${item.schedule.Enabled ? '' : 'is-disabled'}`}
-      onClick={() => onOpen(item)}
-      style={groupAccentStyle(item)}
-      type="button"
-      title={`Show exact runs for ${title}`}
-    >
-      <span className="process-row-copy">
-        <span className="process-row-title">{item.schedule.Name}</span>
-        <span className="process-row-meta">
-          <span className="bucket-dot" aria-hidden="true" />
-          {item.bucketLabel}
-        </span>
-      </span>
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className={`process-row ${rowModeClass} ${compact ? 'compact' : ''} ${item.schedule.Enabled ? '' : 'is-disabled'}`}
+          onClick={() => onOpen(item)}
+          style={groupAccentStyle(item)}
+          type="button"
+        >
+          <span className="process-row-copy">
+            <span className="process-row-title">{item.schedule.Name}</span>
+            <span className="process-row-meta">
+              <span className="bucket-dot" aria-hidden="true" />
+              {item.bucketLabel}
+            </span>
+          </span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{`Show exact runs for ${title}`}</TooltipContent>
+    </Tooltip>
   )
 })
 
@@ -73,25 +82,29 @@ export const ProcessSpanBar = memo(function ProcessSpanBar({
   const title = `${item.schedule.Name} · ${item.patternLabel} · ${bar.timingLabel}`
 
   return (
-    <button
-      className={`calendar-span-bar ${item.schedule.Enabled ? '' : 'is-disabled'}`}
-      onClick={() => onOpen(item)}
-      style={
-        {
-          ...groupAccentStyle(item),
-          '--span-offset': `${bar.lane * 18}px`,
-          '--week-span-offset': `${bar.lane * 29}px`,
-          gridColumn: `${bar.startColumn} / span ${bar.spanDays}`,
-          gridRow: `${bar.weekIndex + 2}`,
-        } as CSSProperties
-      }
-      type="button"
-      title={`Show exact runs for ${title}`}
-    >
-      <span className="calendar-span-copy">
-        <span className="calendar-span-title">{item.schedule.Name}</span>
-        <span className="calendar-span-meta">{item.bucketLabel}</span>
-      </span>
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className={`calendar-span-bar ${item.schedule.Enabled ? '' : 'is-disabled'}`}
+          onClick={() => onOpen(item)}
+          style={
+            {
+              ...groupAccentStyle(item),
+              '--span-offset': `${bar.lane * 18}px`,
+              '--week-span-offset': `${bar.lane * 29}px`,
+              gridColumn: `${bar.startColumn} / span ${bar.spanDays}`,
+              gridRow: `${bar.weekIndex + 2}`,
+            } as CSSProperties
+          }
+          type="button"
+        >
+          <span className="calendar-span-copy">
+            <span className="calendar-span-title">{item.schedule.Name}</span>
+            <span className="calendar-span-meta">{item.bucketLabel}</span>
+          </span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{`Show exact runs for ${title}`}</TooltipContent>
+    </Tooltip>
   )
 })

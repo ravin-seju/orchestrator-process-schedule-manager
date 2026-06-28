@@ -75,6 +75,7 @@ describe('summary metric derivation', () => {
       Collisions: 2,
       Duplicates: 0,
       Enabled: 2,
+      Folders: 2,
       Stale: 0,
       Triggers: 4,
     })
@@ -166,5 +167,65 @@ describe('summary metric derivation', () => {
 
     const result = metricValues([expiredOneShot], 'enabled')
     expect(result.Stale).toBe(1)
+  })
+})
+
+const robotAssignment = (robotId: number) => ({
+  MachineId: null,
+  MachineName: null,
+  RobotId: robotId,
+  RobotUserName: null,
+  SessionId: null,
+  SessionName: null,
+})
+
+const metricValuesWithRuntime = (
+  schedules: ProcessSchedule[],
+  scheduleMachineIds: Map<number, number[]>,
+  statusFilter: 'all' | 'enabled' | 'disabled' = 'enabled',
+) => {
+  const { start, end } = dayRange(new Date(2026, 4, 6))
+  return Object.fromEntries(
+    buildSummaryMetricData({
+      schedules,
+      scheduleMachineIds,
+      statusFilter,
+      todayEnd: end,
+      todayStart: start,
+    }).map((metric) => [metric.label, metric.value]),
+  )
+}
+
+describe('machine and robot metrics', () => {
+  const sA = baseSchedule({ Id: 1, folderId: 100, MachineRobots: [robotAssignment(5)] })
+  const sB = baseSchedule({ Id: 2, folderId: 100, MachineRobots: [robotAssignment(5)] })
+  const sC = baseSchedule({ Id: 3, folderId: 200, MachineRobots: [robotAssignment(7)] })
+
+  it('counts distinct runtime machines and assigned robots when the runtime map is provided', () => {
+    const scheduleMachineIds = new Map<number, number[]>([
+      [1, [111]],
+      [2, [111, 222]],
+      // sC has no run history → contributes no machine
+    ])
+    const result = metricValuesWithRuntime([sA, sB, sC], scheduleMachineIds, 'enabled')
+    expect(result.Machines).toBe(2) // distinct machine keys {111, 222}
+    expect(result.Robots).toBe(2) // distinct robot ids {5, 7}
+  })
+
+  it('omits Machines and Robots metrics when no runtime map is provided', () => {
+    const result = metricValues([sA, sB, sC], 'enabled')
+    expect(result).not.toHaveProperty('Machines')
+    expect(result).not.toHaveProperty('Robots')
+  })
+
+  it('recomputes machine and robot counts from the visible (filtered) schedules', () => {
+    const scheduleMachineIds = new Map<number, number[]>([
+      [1, [111]],
+      [2, [111, 222]],
+    ])
+    // Only sC visible → no machine history, single robot
+    const result = metricValuesWithRuntime([sC], scheduleMachineIds, 'enabled')
+    expect(result.Machines).toBe(0)
+    expect(result.Robots).toBe(1)
   })
 })

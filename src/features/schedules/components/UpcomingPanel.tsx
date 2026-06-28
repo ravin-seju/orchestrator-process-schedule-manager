@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { maxUpcomingItemsPerGroup } from '../constants'
 import { formatNumber } from '../formatters'
-import type { ProcessDayGroup, SelectedDayDetail, UpcomingDisplayGroup } from '../types'
+import type { ProcessDayGroup, RuntimeStats, SelectedDayDetail, UpcomingDisplayGroup } from '../types'
 import type { ScheduleOccurrence } from '../scheduleUtils'
 import { DayDetailsPanel, UpcomingPill } from './index'
 
@@ -16,6 +16,10 @@ export function UpcomingPanel({
   onOpenDayDetail,
   selectedDayOccurrences,
   upcomingDisplayGroups,
+  runtimeStats,
+  robotNames,
+  machineNames,
+  scheduleMachineIds,
 }: {
   activeSelectedDayDetail: SelectedDayDetail | null
   disabledCount: number
@@ -27,6 +31,10 @@ export function UpcomingPanel({
   onOpenDayDetail: (item: ProcessDayGroup) => void
   selectedDayOccurrences: ScheduleOccurrence[]
   upcomingDisplayGroups: UpcomingDisplayGroup[]
+  runtimeStats?: Map<number, RuntimeStats>
+  robotNames?: Map<number, string>
+  machineNames?: Map<number, string>
+  scheduleMachineIds?: Map<number, number[]>
 }) {
   if (!isExpanded && !activeSelectedDayDetail) {
     return (
@@ -50,6 +58,10 @@ export function UpcomingPanel({
         selectedDay={activeSelectedDayDetail}
         occurrences={selectedDayOccurrences}
         onClose={onCloseDayDetails}
+        runtimeStats={runtimeStats}
+        robotNames={robotNames}
+        machineNames={machineNames}
+        scheduleMachineIds={scheduleMachineIds}
       />
     )
   }
