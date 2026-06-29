@@ -46,7 +46,7 @@ const rememberSavedConnection = () => {
           {
             clientId: 'client-id',
             name: 'Customer OAuth App',
-            scope: 'OR.Folders.Read OR.Execution.Read OR.Jobs.Read',
+            scope: 'OR.Folders.Read OR.Execution.Read OR.Jobs.Read OR.Machines.Read OR.Robots.Read',
             urlAppRedirect: 'http://localhost:5175',
           },
         ],
@@ -71,7 +71,7 @@ const rememberMultipleSavedConnections = () => {
           {
             clientId: 'client-id',
             name: 'Customer OAuth App',
-            scope: 'OR.Folders.Read OR.Execution.Read OR.Jobs.Read',
+            scope: 'OR.Folders.Read OR.Execution.Read OR.Jobs.Read OR.Machines.Read OR.Robots.Read',
             urlAppRedirect: 'http://localhost:5175',
           },
         ],
@@ -87,7 +87,7 @@ const rememberMultipleSavedConnections = () => {
           {
             clientId: 'finance-client-id',
             name: 'Finance OAuth App',
-            scope: 'OR.Folders.Read OR.Execution.Read OR.Jobs.Read',
+            scope: 'OR.Folders.Read OR.Execution.Read OR.Jobs.Read OR.Machines.Read OR.Robots.Read',
             urlAppRedirect: 'http://localhost:5175',
           },
         ],
@@ -103,10 +103,15 @@ const rememberMultipleSavedConnections = () => {
   window.localStorage.setItem('process-schedule-manager.oauth.active-auth-config-id', 'saved-connection-0-0')
 }
 
+const acknowledgeConnections = (...groupIds: string[]) => {
+  window.localStorage.setItem('process-schedule-manager.oauth.scopes-acknowledged', JSON.stringify(groupIds))
+}
+
 beforeEach(() => {
   cleanup()
   vi.resetModules()
   window.localStorage.clear()
+  window.sessionStorage.clear()
   window.history.replaceState(null, '', '/')
 })
 
@@ -145,6 +150,55 @@ describe('App auth routing', () => {
     expect(screen.queryByText(/Demo/)).not.toBeInTheDocument()
   })
 
+  it('lands on a sign-in recovery screen after returning from a failed OAuth attempt', async () => {
+    rememberSavedConnection()
+    window.sessionStorage.setItem('process-schedule-manager.oauth.signin-attempt', '1')
+
+    await renderApp()
+
+    expect(await screen.findByText('Sign-in did not complete')).toBeInTheDocument()
+    expect(screen.getByText('OR.Machines.Read')).toBeInTheDocument()
+    expect(screen.getByText('OR.Robots.Read')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try Again' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Manage Connection' })).toBeInTheDocument()
+  })
+
+  it('shows a one-time scope confirmation before the first sign-in of a connection', async () => {
+    rememberSavedConnection()
+
+    await renderApp()
+
+    expect(await screen.findByText('Confirm Orchestrator access')).toBeInTheDocument()
+    expect(screen.getByText('OR.Machines.Read')).toBeInTheDocument()
+    expect(screen.getByText('OR.Robots.Read')).toBeInTheDocument()
+
+    const continueButton = screen.getByRole('button', { name: 'Continue to sign in' })
+    expect(continueButton).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument()
+
+    fireEvent.click(continueButton)
+
+    const acknowledged = JSON.parse(
+      window.localStorage.getItem('process-schedule-manager.oauth.scopes-acknowledged') ?? '[]',
+    ) as string[]
+    expect(acknowledged).toContain('saved-connection')
+  })
+
+  it('routes Sign in through the scope confirmation even from the manager view (no bypass)', async () => {
+    rememberSavedConnection()
+
+    await renderApp()
+
+    // Unacknowledged connection → confirm card first. Open the manager view from it.
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage Connection' }))
+    // The manager view exposes the inline "Sign in"; clicking it must NOT bypass the card.
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+
+    expect(await screen.findByText('Confirm Orchestrator access')).toBeInTheDocument()
+    // login() was gated, not invoked — so no sign-in breadcrumb was dropped.
+    expect(window.sessionStorage.getItem('process-schedule-manager.oauth.signin-attempt')).toBeNull()
+  })
+
   it('uses a required setup panel instead of an editable scope field', async () => {
     await renderApp()
 
@@ -167,12 +221,13 @@ describe('App auth routing', () => {
 
   it('shows a lightweight sign-in view when a connection is already saved', async () => {
     rememberSavedConnection()
+    acknowledgeConnections('saved-connection')
 
     await renderApp()
 
     expect(await screen.findByLabelText('Saved UiPath connection')).toBeInTheDocument()
     expect(screen.getByText('ravinseju')).toBeInTheDocument()
-    expect(screen.getByText('https://staging.uipath.com')).toBeInTheDocument()
+    expect(screen.getByText('Staging')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Manage Connection' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Add Connection/i })).not.toBeInTheDocument()
@@ -183,6 +238,7 @@ describe('App auth routing', () => {
 
   it('opens the saved connection picker only when requested from saved sign-in', async () => {
     rememberSavedConnection()
+    acknowledgeConnections('saved-connection')
 
     await renderApp()
 
@@ -203,6 +259,7 @@ describe('App auth routing', () => {
 
   it('lists saved connections by organization and lets the user change the active connection', async () => {
     rememberMultipleSavedConnections()
+    acknowledgeConnections('saved-connection', 'finance-connection')
 
     await renderApp()
 
@@ -237,6 +294,7 @@ describe('App auth routing', () => {
 
   it('deletes a selected non-active saved connection without removing the active connection', async () => {
     rememberMultipleSavedConnections()
+    acknowledgeConnections('saved-connection', 'finance-connection')
 
     await renderApp()
 

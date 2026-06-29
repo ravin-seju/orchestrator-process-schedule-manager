@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest'
-import { cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render as baseRender, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { createRef } from 'react'
+import type { ReactElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { TooltipProvider } from '../../../components/ui/tooltip'
 import {
   buildProcessDayGroups,
   buildSpanBarLayout,
@@ -31,6 +33,13 @@ import {
   sortOccurrences,
 } from '../scheduleUtils'
 import type { CalendarViewMode, ViewMode } from '../types'
+
+// Components under test now render Radix tooltips, which throw without a
+// TooltipProvider ancestor (the app supplies one at the root in App.tsx). Wrap
+// every render so isolated component tests share that context. TooltipProvider
+// renders no DOM, so container/baseElement assertions are unaffected.
+const render = (ui: ReactElement, options?: Parameters<typeof baseRender>[1]) =>
+  baseRender(ui, { wrapper: TooltipProvider, ...options })
 
 if (!Element.prototype.hasPointerCapture) {
   Element.prototype.hasPointerCapture = () => false
@@ -192,6 +201,26 @@ const hourlyGroupForDay = () => {
   return { date, group, occurrences, schedule }
 }
 
+const robotGroupForDay = () => {
+  const schedule = baseSchedule({
+    Id: 10,
+    Name: 'Hourly Process',
+    ReleaseName: 'Download.File',
+    StartProcessCron: '0 0 * 1/1 * ?',
+    StartProcessCronDetails: JSON.stringify({ type: 1, hourly: { atHour: 0, atMinute: 0 } }),
+    StartProcessCronSummary: 'Every hour',
+    MachineRobots: [
+      { MachineId: 501, MachineName: 'ROBOT-VM-01', RobotId: 201, RobotUserName: 'Bot.Alpha', SessionId: null, SessionName: null },
+    ],
+  })
+  const date = new Date(2026, 4, 6)
+  const { start, end } = dayRange(date)
+  const occurrences = getScheduleOccurrences(schedule, start, end)
+  const group = buildProcessDayGroups(occurrences)[0]
+
+  return { date, group, occurrences, schedule }
+}
+
 describe('SummaryBand component', () => {
   it('renders the filter-aware summary metric labels and formatted values', () => {
     render(
@@ -325,8 +354,10 @@ describe('FilterToolbar component', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Folder filter' }))
 
     const longFolderOption = await screen.findByRole('button', { name: 'Very Long Folder Name For Customer Operations' })
-    expect(longFolderOption).toHaveAttribute('title', longFolderName)
     expect(longFolderOption.querySelector('span:last-child')).toHaveTextContent('Very Long Folder Name For Customer Operations')
+    // Full path is preserved in the tooltip (shown on hover/focus) rather than a native title.
+    fireEvent.focus(longFolderOption)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(longFolderName)
   })
 
   it('selects all eligible child and sub-child folders when a parent folder is clicked', async () => {
@@ -831,7 +862,7 @@ describe('CalendarWorkbench component', () => {
     expect(screen.getAllByRole('button', { name: /Hourly Process/i })[0]).toHaveTextContent('Hourly')
     expect(screen.getAllByRole('button', { name: /Hourly Process/i })[0]).not.toHaveTextContent('24 runs')
     expect(screen.getAllByRole('button', { name: /Hourly Process/i })[0]).toHaveAttribute(
-      'title',
+      'aria-label',
       expect.stringContaining('24 runs'),
     )
     expect(screen.queryByText('Hourly Process C')).not.toBeInTheDocument()
@@ -839,7 +870,7 @@ describe('CalendarWorkbench component', () => {
     expect(screen.getAllByRole('button', { name: /Hourly Process C/i })[0]).toHaveTextContent('Hourly')
     expect(screen.getAllByRole('button', { name: /Hourly Process C/i })[0]).not.toHaveTextContent('24 runs')
     expect(screen.getAllByRole('button', { name: /Hourly Process C/i })[0]).toHaveAttribute(
-      'title',
+      'aria-label',
       expect.stringContaining('24 runs'),
     )
     fireEvent.click(screen.getByRole('button', { name: 'Collapse all-day triggers' }))
@@ -1315,6 +1346,113 @@ describe('UpcomingPanel component', () => {
 
     expect(onClose).toHaveBeenCalledOnce()
   })
+
+  it('renders runtime stats, timezone, and robot/machine when the run-info maps are supplied', () => {
+    const { date, group, occurrences } = robotGroupForDay()
+
+    render(
+      <UpcomingPanel
+        activeSelectedDayDetail={{ key: dateKey(date), date, scheduleKey: group.scheduleKey, scope: 'schedule' }}
+        disabledCount={0}
+        enabledCount={1}
+        isExpanded
+        onCloseDayDetails={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onOpenDay={vi.fn()}
+        onOpenDayDetail={vi.fn()}
+        selectedDayOccurrences={occurrences}
+        upcomingDisplayGroups={[]}
+        runtimeStats={new Map([[group.schedule.Id, { medianSec: 180, p90Sec: 300, sampleSize: 15 }]])}
+        robotNames={new Map([[201, 'rparobot@intuit.com-unattended']])}
+        machineNames={new Map([[501, 'ROBOT-VM-01']])}
+        scheduleMachineIds={new Map([[group.schedule.Id, [501]]])}
+      />,
+    )
+
+    expect(screen.getByText('Time zone: America/Chicago')).toBeInTheDocument()
+    expect(screen.getByText('Runtime · based on 15 runs')).toBeInTheDocument()
+    expect(screen.getByText('Typical 3m · Worst case (p90) 5m')).toBeInTheDocument()
+    expect(screen.getByText('Robot: rparobot')).toBeInTheDocument()
+    expect(screen.getByText('Machine: ROBOT-VM-01')).toBeInTheDocument()
+  })
+
+  it('summarizes the machine list as a hover affordance when many hosts run the schedule', () => {
+    const { date, group, occurrences } = robotGroupForDay()
+    const machineIds = [501, 502, 503, 504, 505]
+
+    render(
+      <UpcomingPanel
+        activeSelectedDayDetail={{ key: dateKey(date), date, scheduleKey: group.scheduleKey, scope: 'schedule' }}
+        disabledCount={0}
+        enabledCount={1}
+        isExpanded
+        onCloseDayDetails={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onOpenDay={vi.fn()}
+        onOpenDayDetail={vi.fn()}
+        selectedDayOccurrences={occurrences}
+        upcomingDisplayGroups={[]}
+        runtimeStats={new Map([[group.schedule.Id, { medianSec: 180, p90Sec: 300, sampleSize: 15 }]])}
+        robotNames={new Map([[201, 'rparobot@intuit.com-unattended']])}
+        machineNames={new Map(machineIds.map((id, index) => [id, `HOST-${index + 1}`]))}
+        scheduleMachineIds={new Map([[group.schedule.Id, machineIds]])}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '5 machines (dynamic pool)' })).toBeInTheDocument()
+    // Full host list lives in the tooltip (Radix portal) — not in the DOM until hover.
+    expect(screen.queryByText(/HOST-1, HOST-2/)).not.toBeInTheDocument()
+  })
+
+  it('falls back to "No recent run history" when the run-info maps are supplied but the schedule has no stats', () => {
+    const { date, group, occurrences } = hourlyGroupForDay()
+
+    render(
+      <UpcomingPanel
+        activeSelectedDayDetail={{ key: dateKey(date), date, scheduleKey: group.scheduleKey, scope: 'schedule' }}
+        disabledCount={0}
+        enabledCount={1}
+        isExpanded
+        onCloseDayDetails={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onOpenDay={vi.fn()}
+        onOpenDayDetail={vi.fn()}
+        selectedDayOccurrences={occurrences}
+        upcomingDisplayGroups={[]}
+        runtimeStats={new Map()}
+        robotNames={new Map()}
+        machineNames={new Map()}
+        scheduleMachineIds={new Map()}
+      />,
+    )
+
+    expect(screen.getByText('No recent run history')).toBeInTheDocument()
+    expect(screen.queryByText(/^Runtime ·/)).not.toBeInTheDocument()
+  })
+
+  it('omits run info (timezone aside) when no run-info maps are supplied', () => {
+    const { date, group, occurrences } = hourlyGroupForDay()
+
+    render(
+      <UpcomingPanel
+        activeSelectedDayDetail={{ key: dateKey(date), date, scheduleKey: group.scheduleKey, scope: 'schedule' }}
+        disabledCount={0}
+        enabledCount={1}
+        isExpanded
+        onCloseDayDetails={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onOpenDay={vi.fn()}
+        onOpenDayDetail={vi.fn()}
+        selectedDayOccurrences={occurrences}
+        upcomingDisplayGroups={[]}
+      />,
+    )
+
+    expect(screen.getByText('Time zone: America/Chicago')).toBeInTheDocument()
+    expect(screen.queryByText('No recent run history')).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Robot:/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Machine:/)).not.toBeInTheDocument()
+  })
 })
 
 describe('ScheduleTable component', () => {
@@ -1349,17 +1487,82 @@ describe('ScheduleTable component', () => {
 
     const table = screen.getByRole('table')
     const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent)
-    expect(headers).toEqual(['#', 'Name', 'Process', 'Folder', 'Trigger Type', 'Pattern', 'Status'])
+    expect(headers).toEqual(['#', 'Name', 'Process', 'Folder', 'Machine', 'Robot', 'Trigger Type', 'Pattern', 'Status'])
     expect(within(table).getByText('1')).toBeInTheDocument()
     expect(within(table).getByText('2')).toBeInTheDocument()
     expect(within(table).getByText('3')).toBeInTheDocument()
-    expect(screen.getByTitle(longProcessName)).toBeInTheDocument()
-    expect(screen.getByTitle('Every hour')).toBeInTheDocument()
+    expect(screen.getByText(longProcessName)).toBeInTheDocument()
+    expect(screen.getByText('Every hour')).toBeInTheDocument()
     expect(screen.getByText('Daily')).toBeInTheDocument()
     expect(screen.getByText('Hourly')).toBeInTheDocument()
     expect(screen.getByText('Minute-by-minute')).toBeInTheDocument()
     expect(screen.getAllByText('Enabled')).toHaveLength(2)
     expect(screen.getByText('Disabled')).toBeInTheDocument()
+    // With no machine/robot maps passed, both columns render but read "—".
+    expect(table.querySelector('.table-machine')?.textContent).toBe('—')
+    expect(table.querySelector('.table-robot')?.textContent).toBe('—')
+  })
+
+  it('renders machine and robot columns with first value plus +N overflow and a hover list', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 41,
+        Name: 'Pool Process',
+        MachineRobots: [
+          { MachineId: null, MachineName: null, RobotId: 201, RobotUserName: 'Bot.Alpha', SessionId: null, SessionName: null },
+        ],
+      }),
+      baseSchedule({
+        Id: 42,
+        Name: 'Single Machine Process',
+        MachineRobots: [
+          { MachineId: null, MachineName: null, RobotId: 202, RobotUserName: 'Bot.Beta', SessionId: null, SessionName: null },
+        ],
+      }),
+      baseSchedule({ Id: 43, Name: 'No Runtime Process' }),
+    ]
+    const scheduleMachineIds = new Map<number, number[]>([
+      [41, [501, 502, 503]],
+      [42, [504]],
+      // 43 has no run history
+    ])
+    const machineNames = new Map<number, string>([
+      [501, 'HOST-1'],
+      [502, 'HOST-2'],
+      [503, 'HOST-3'],
+      [504, 'HOST-4'],
+    ])
+    const robotNames = new Map<number, string>([[201, 'rparobot@example.com-unattended']])
+
+    render(
+      <ScheduleTable
+        schedules={schedules}
+        scheduleMachineIds={scheduleMachineIds}
+        machineNames={machineNames}
+        robotNames={robotNames}
+      />,
+    )
+
+    const table = screen.getByRole('table')
+    const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent)
+    expect(headers).toEqual(['#', 'Name', 'Process', 'Folder', 'Machine', 'Robot', 'Trigger Type', 'Pattern', 'Status'])
+
+    // Row 41: 3 machines → first host + "+2"; robot resolved via robotNames → formatRobotDisplayName.
+    expect(screen.getByText('HOST-1')).toBeInTheDocument()
+    expect(screen.getByText('+2')).toBeInTheDocument()
+    expect(screen.getByText('rparobot')).toBeInTheDocument()
+    // Full host list lives only in the (portal) tooltip — not inline in the DOM.
+    expect(screen.queryByText('HOST-1, HOST-2, HOST-3')).not.toBeInTheDocument()
+
+    // Row 42: single machine → plain host (no +N badge); robot falls back to inline RobotUserName.
+    expect(screen.getByText('HOST-4')).toBeInTheDocument()
+    expect(screen.getByText('Bot.Beta')).toBeInTheDocument()
+
+    // Row 43: no machine/robot data → "—" in both cells.
+    const machineCells = Array.from(table.querySelectorAll('.table-machine')).map((cell) => cell.textContent)
+    const robotCells = Array.from(table.querySelectorAll('.table-robot')).map((cell) => cell.textContent)
+    expect(machineCells).toContain('—')
+    expect(robotCells).toContain('—')
   })
 
   it('sizes inventory columns from the loaded trigger data without forcing horizontal scroll', () => {

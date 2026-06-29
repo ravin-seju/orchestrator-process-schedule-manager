@@ -5,16 +5,23 @@ import {
   folderAccentStyle,
   recurrenceAccentStyle,
 } from '../calendarDisplay'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { recurrenceBucketLabels } from '../constants'
 import { formatNumber } from '../formatters'
 import type { ProcessSchedule } from '../orchestrator'
-import { getScheduleSummary, isQueueTrigger } from '../scheduleUtils'
+import { getScheduleSummary, isQueueTrigger, resolveMachineNames, resolveRobotNames } from '../scheduleUtils'
 
 const inventoryRowHeight = 36
 const inventoryOverscan = 8
-const inventoryColumnCount = 7
+const inventoryColumnCount = 9
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
-const reservedColumnPercent = 19.5
+// Number + status + type (fixed-ish) plus the two fixed-percent Machine/Robot columns;
+// the remainder is shared by the text-weighted name/process/folder/pattern columns.
+const reservedColumnPercent = 39.5
 const textWidth = (value: string | null | undefined, min: number, max: number) =>
   clamp((value?.length ?? 0) * 7.6 + 34, min, max)
 
@@ -26,10 +33,20 @@ const toPercent = (value: number) => `${value.toFixed(2)}%`
 export function ScheduleTable({
   schedules,
   className = '',
+  robotNames,
+  machineNames,
+  scheduleMachineIds,
 }: {
   schedules: ProcessSchedule[]
   className?: string
+  robotNames?: Map<number, string>
+  machineNames?: Map<number, string>
+  scheduleMachineIds?: Map<number, number[]>
 }) {
+  // Any of the machine/robot maps being present signals the columns have data to show;
+  // a schedule with no associated machine/robot still renders an em dash per cell.
+  const showMachineRobot =
+    robotNames !== undefined || machineNames !== undefined || scheduleMachineIds !== undefined
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState({ height: 0, scrollTop: 0 })
   const updateViewport = useCallback(() => {
@@ -94,15 +111,44 @@ export function ScheduleTable({
     return {
       style: {
         '--inventory-folder-width': widthFor(folderWeight),
+        '--inventory-machine-width': '11%',
         '--inventory-name-width': widthFor(nameWeight),
         '--inventory-number-width': numberWidth,
         '--inventory-pattern-width': widthFor(patternWeight),
         '--inventory-process-width': widthFor(processWidth),
+        '--inventory-robot-width': '9%',
         '--inventory-status-width': '6.5%',
         '--inventory-type-width': '10.5%',
       } as CSSProperties,
     }
   }, [schedules])
+
+  // Machine/Robot cell: first value inline, "+N" overflow badge with the full list on
+  // hover; a single value renders plain; no data renders an em dash.
+  const resourceCell = (names: string[], cls: string) => {
+    if (!showMachineRobot || names.length === 0) return <td className={cls}>—</td>
+    if (names.length === 1) {
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <td className={cls}>{names[0]}</td>
+          </TooltipTrigger>
+          <TooltipContent>{names[0]}</TooltipContent>
+        </Tooltip>
+      )
+    }
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <td className={cls}>
+            <span className="table-resource-name">{names[0]}</span>{' '}
+            <span className="table-more">+{names.length - 1}</span>
+          </td>
+        </TooltipTrigger>
+        <TooltipContent>{names.join(', ')}</TooltipContent>
+      </Tooltip>
+    )
+  }
 
   return (
     <section className={`table-section ${className}`.trim()} aria-label="Triggers">
@@ -113,6 +159,8 @@ export function ScheduleTable({
             <col className="name-column" />
             <col className="process-column" />
             <col className="folder-column" />
+            <col className="machine-column" />
+            <col className="robot-column" />
             <col className="type-column" />
             <col className="pattern-column" />
             <col className="status-column" />
@@ -123,6 +171,8 @@ export function ScheduleTable({
               <th>Name</th>
               <th>Process</th>
               <th>Folder</th>
+              <th>Machine</th>
+              <th>Robot</th>
               <th>Trigger Type</th>
               <th>Pattern</th>
               <th>Status</th>
@@ -146,15 +196,45 @@ export function ScheduleTable({
               return (
                 <tr key={`${schedule.folderId}-${schedule.Id}`} style={folderAccentStyle(schedule.folderName)}>
                   <td className="table-number">{formatNumber(index + 1)}</td>
-                  <td className="table-name" title={schedule.Name}>{schedule.Name}</td>
-                  <td className="table-process" title={processLabel}>{processLabel}</td>
-                  <td className="table-folder" title={schedule.folderName}>{schedule.folderName}</td>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <td className="table-name">{schedule.Name}</td>
+                    </TooltipTrigger>
+                    <TooltipContent>{schedule.Name}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <td className="table-process">{processLabel}</td>
+                    </TooltipTrigger>
+                    <TooltipContent>{processLabel}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <td className="table-folder">{schedule.folderName}</td>
+                    </TooltipTrigger>
+                    <TooltipContent>{schedule.folderName}</TooltipContent>
+                  </Tooltip>
+                  {resourceCell(
+                    showMachineRobot ? resolveMachineNames(schedule.Id, scheduleMachineIds, machineNames) : [],
+                    'table-machine',
+                  )}
+                  {resourceCell(showMachineRobot ? resolveRobotNames(schedule, robotNames) : [], 'table-robot')}
                   <td>
-                    <span className="schedule-type-chip" style={recurrenceAccentStyle(bucket)} title={triggerTypeLabel}>
-                      {triggerTypeLabel}
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="schedule-type-chip" style={recurrenceAccentStyle(bucket)}>
+                          {triggerTypeLabel}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{triggerTypeLabel}</TooltipContent>
+                    </Tooltip>
                   </td>
-                  <td className="table-pattern" title={patternTitle}>{patternLabel}</td>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <td className="table-pattern">{patternLabel}</td>
+                    </TooltipTrigger>
+                    <TooltipContent>{patternTitle}</TooltipContent>
+                  </Tooltip>
                   <td>
                     <span className={schedule.Enabled ? 'status enabled' : 'status disabled'}>
                       {schedule.Enabled ? 'Enabled' : 'Disabled'}

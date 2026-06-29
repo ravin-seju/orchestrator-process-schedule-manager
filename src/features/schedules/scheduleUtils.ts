@@ -346,6 +346,107 @@ export const getScheduleSummary = (schedule: ProcessSchedule) => {
 export const isQueueTrigger = (schedule: ProcessSchedule): boolean =>
   schedule.QueueDefinitionId !== null && schedule.QueueDefinitionId !== undefined
 
+export const getAssignedMachineIds = (schedule: ProcessSchedule): number[] =>
+  schedule.MachineRobots?.map((mr) => mr.MachineId).filter((id): id is number => id != null) ?? []
+
+export const getAssignedRobotIds = (schedule: ProcessSchedule): number[] =>
+  schedule.MachineRobots?.map((mr) => mr.RobotId).filter((id): id is number => id != null) ?? []
+
+// Orchestrator robot names are typically "<account>@<domain>-<type>"
+// (e.g. "automationbot@example.com-unattended"). Show just the account portion so the
+// label matches the Orchestrator UI's Name column. Domain-agnostic — works for any
+// tenant; returns the input unchanged when there is no "@".
+export const formatRobotDisplayName = (name: string): string => name.split('@')[0] || name
+
+// Resolve each schedule's effective machine keys: the machines its OWN scheduled jobs
+// ran on (direct), falling back to its release's machines (from manual runs) ONLY when
+// the schedule has no direct association. Fallback-only keeps the looser process-level
+// guess confined to schedules that would otherwise show no machine.
+export const buildEffectiveScheduleMachineIds = (
+  schedules: ProcessSchedule[],
+  direct: Map<number, number[]>,
+  releaseFallback: Map<number, number[]>,
+): Map<number, number[]> => {
+  const effective = new Map<number, number[]>()
+  for (const schedule of schedules) {
+    const own = direct.get(schedule.Id)
+    if (own && own.length) {
+      effective.set(schedule.Id, own)
+    } else if (schedule.ReleaseId != null) {
+      const fallback = releaseFallback.get(schedule.ReleaseId)
+      if (fallback && fallback.length) effective.set(schedule.Id, fallback)
+    }
+  }
+  return effective
+}
+
+// Robot display names for a schedule: prefer the canonical Robot.Name from Jobs
+// ($expand=Robot), shortened to the account part, else the schedule's inline
+// RobotUserName, else a synthetic label. Deduped by RobotId. Shared by the detail
+// panel and the inventory Robot column.
+export const resolveRobotNames = (
+  schedule: ProcessSchedule,
+  robotNames?: Map<number, string>,
+): string[] => {
+  const names = new Map<number, string>()
+  for (const mr of schedule.MachineRobots ?? []) {
+    if (mr.RobotId == null || names.has(mr.RobotId)) continue
+    const canonical = robotNames?.get(mr.RobotId)
+    names.set(mr.RobotId, canonical ? formatRobotDisplayName(canonical) : (mr.RobotUserName ?? `Robot ${mr.RobotId}`))
+  }
+  return [...names.values()]
+}
+
+// Machine display names for a schedule, from job history (where scheduled runs
+// actually executed), keyed by schedule Id and name-resolved via the Jobs-derived
+// machineNames map. Shared by the detail panel and the inventory Machine column.
+export const resolveMachineNames = (
+  scheduleId: number,
+  scheduleMachineIds?: Map<number, number[]>,
+  machineNames?: Map<number, string>,
+): string[] => (scheduleMachineIds?.get(scheduleId) ?? []).map((id) => machineNames?.get(id) ?? `Machine ${id}`)
+
+// Given selected machine keys, return the folders + robots of the schedules that ran
+// on those machines — used to auto-narrow the folder + robot pickers on machine select.
+export const deriveMachineScopeSelection = (
+  schedules: ProcessSchedule[],
+  effectiveMachineIds: Map<number, number[]>,
+  machineIds: number[],
+): { folderIds: string[]; robotIds: number[] } => {
+  if (!machineIds.length) return { folderIds: [], robotIds: [] }
+  const machineSet = new Set(machineIds)
+  const folderIds = new Set<string>()
+  const robotIds = new Set<number>()
+  for (const schedule of schedules) {
+    const machines = effectiveMachineIds.get(schedule.Id) ?? []
+    if (!machines.some((id) => machineSet.has(id))) continue
+    folderIds.add(String(schedule.folderId))
+    for (const id of getAssignedRobotIds(schedule)) robotIds.add(id)
+  }
+  return { folderIds: [...folderIds], robotIds: [...robotIds] }
+}
+
+// Inverse of deriveMachineScopeSelection: given selected folder ids, return the machines
+// + robots of the schedules in those folders — used to narrow the machine + robot picker
+// OPTION LISTS on folder select (display only; never auto-applies a machine/robot filter,
+// which keeps the folder→picker direction acyclic).
+export const deriveFolderScopeSelection = (
+  schedules: ProcessSchedule[],
+  effectiveMachineIds: Map<number, number[]>,
+  folderIds: string[],
+): { machineIds: number[]; robotIds: number[] } => {
+  if (!folderIds.length) return { machineIds: [], robotIds: [] }
+  const folderSet = new Set(folderIds)
+  const machineIds = new Set<number>()
+  const robotIds = new Set<number>()
+  for (const schedule of schedules) {
+    if (!folderSet.has(String(schedule.folderId))) continue
+    for (const id of effectiveMachineIds.get(schedule.Id) ?? []) machineIds.add(id)
+    for (const id of getAssignedRobotIds(schedule)) robotIds.add(id)
+  }
+  return { machineIds: [...machineIds], robotIds: [...robotIds] }
+}
+
 export const getScheduleOccurrences = (
   schedule: ProcessSchedule,
   start: Date,

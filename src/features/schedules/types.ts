@@ -94,3 +94,14 @@ export type SelectedDayDetail = {
   scope?: SelectedDayDetailScope
   startMinute?: number
 }
+
+export interface MachineOption {
+  id: number
+  name: string
+}
+
+export interface RuntimeStats {
+  medianSec: number
+  p90Sec: number
+  sampleSize: number
+}

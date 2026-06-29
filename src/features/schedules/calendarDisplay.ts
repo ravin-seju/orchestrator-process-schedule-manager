@@ -25,6 +25,7 @@ import type {
   OutlookWeekTimedEvent,
   ProcessDayGroup,
   RecurrenceBucket,
+  RuntimeStats,
   ScheduleSearchEntry,
   SpanBarLayout,
   ViewMode,
@@ -257,16 +258,34 @@ export const buildProcessDayGroups = (occurrences: ScheduleOccurrence[]) => {
   )
 }
 
-const getSpanTimingLabel = (item: ProcessDayGroup, dayCount: number) => {
-  if (dayCount > 1 && item.runCount > 1) return `${formatNumber(item.runCount)}/day`
-  if (dayCount > 1) return formatDayCount(dayCount)
-  return item.runCount > 1 ? formatRunCount(item.runCount) : item.firstOccurrence.timeLabel
+const getSpanTimingLabel = (
+  item: ProcessDayGroup,
+  dayCount: number,
+  runtimeStats?: Map<number, RuntimeStats>,
+) => {
+  let base: string
+  if (dayCount > 1 && item.runCount > 1) {
+    base = `${formatNumber(item.runCount)}/day`
+  } else if (dayCount > 1) {
+    base = formatDayCount(dayCount)
+  } else {
+    base = item.runCount > 1 ? formatRunCount(item.runCount) : item.firstOccurrence.timeLabel
+  }
+
+  const stats = runtimeStats?.get(item.schedule.Id)
+  if (stats) {
+    const typMinutes = Math.max(1, Math.ceil(stats.medianSec / 60))
+    return `${base} (typ. ~${typMinutes}m)`
+  }
+
+  return base
 }
 
 export const buildSpanBarLayout = (
   calendarDays: Date[],
   itemsByDay: Map<string, CalendarDisplayItem[]>,
   visibleLaneLimit: number,
+  runtimeStats?: Map<number, RuntimeStats>,
 ): SpanBarLayout => {
   const bars: CalendarSpanBar[] = []
   const hiddenCountByDay = new Map<string, number>()
@@ -319,7 +338,7 @@ export const buildSpanBarLayout = (
           weekIndex,
           dayCount,
           totalRuns,
-          timingLabel: getSpanTimingLabel(firstItem, dayCount),
+          timingLabel: getSpanTimingLabel(firstItem, dayCount, runtimeStats),
         })
 
         dayIndex = endIndex
@@ -413,6 +432,7 @@ export const buildOutlookWeekLayout = (
   calendarDays: Date[],
   itemsByDay: Map<string, CalendarDisplayItem[]>,
   blockMinutes = outlookWeekDefaultBlockMinutes,
+  runtimeStats?: Map<number, RuntimeStats>,
 ) => ({
   days: calendarDays.map((day) => {
     const key = dateKey(day)
@@ -429,9 +449,14 @@ export const buildOutlookWeekLayout = (
         continue
       }
 
+      const stats = runtimeStats?.get(item.schedule.Id)
+      const eventBlockMinutes = stats
+        ? Math.max(5, Math.ceil(stats.medianSec / 60))
+        : blockMinutes
+
       for (const occurrence of item.occurrences) {
         const startMinute = occurrenceMinuteOfDay(occurrence.date)
-        const endMinute = Math.min(24 * 60, startMinute + blockMinutes)
+        const endMinute = Math.min(24 * 60, startMinute + eventBlockMinutes)
         timedEvents.push({
           id: `${item.id}-${occurrence.id}-timed`,
           item,

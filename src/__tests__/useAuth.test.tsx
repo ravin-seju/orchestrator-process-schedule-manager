@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
+import { StrictMode } from 'react'
 import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AuthProvider, useAuth } from '../hooks/useAuth'
+import { AuthProvider, useAuth, __resetOAuthExchangeForTests } from '../hooks/useAuth'
 import {
   addCustomAuthConfig,
   getAvailableAuthConfigs,
@@ -73,6 +74,8 @@ function Probe() {
         {auth.isInitializing ? 'loading' : auth.isAuthenticated ? 'authenticated' : 'guest'}
       </span>
       <span data-testid="error">{auth.error ?? ''}</span>
+      <span data-testid="signin-incomplete">{auth.signInIncomplete ? 'incomplete' : ''}</span>
+      <span data-testid="authenticating">{auth.isAuthenticating ? 'busy' : ''}</span>
       <span data-testid="active-organization">{auth.activeAuthConfig?.organization ?? ''}</span>
       <span data-testid="config-count">{auth.authConfigs.length}</span>
       <button type="button" onClick={auth.login}>Sign in</button>
@@ -166,7 +169,7 @@ const rememberTwoConfigs = () => {
           {
             clientId: 'client-id',
             name: 'First App',
-            scope: 'OR.Folders.Read OR.Execution.Read OR.Jobs.Read',
+            scope: 'OR.Folders.Read OR.Execution.Read OR.Jobs.Read OR.Machines.Read OR.Robots.Read',
             urlAppRedirect: 'http://localhost:5175',
           },
         ],
@@ -182,7 +185,7 @@ const rememberTwoConfigs = () => {
           {
             clientId: 'second-client-id',
             name: 'Second App',
-            scope: 'OR.Folders.Read OR.Execution.Read OR.Jobs.Read',
+            scope: 'OR.Folders.Read OR.Execution.Read OR.Jobs.Read OR.Machines.Read OR.Robots.Read',
             urlAppRedirect: 'http://localhost:5175',
           },
         ],
@@ -201,10 +204,12 @@ const rememberTwoConfigs = () => {
 beforeEach(() => {
   cleanup()
   window.localStorage.clear()
+  window.sessionStorage.clear()
   window.history.replaceState(null, '', '/')
+  __resetOAuthExchangeForTests()
   sdkState.authenticated = false
   sdkState.callback = false
-  sdkState.token = createToken(['OR.Folders.Read', 'OR.Execution.Read', 'OR.Jobs.Read'])
+  sdkState.token = createToken(['OR.Folders.Read', 'OR.Execution.Read', 'OR.Jobs.Read', 'OR.Machines.Read', 'OR.Robots.Read'])
   sdkState.completeOAuth.mockReset()
   sdkState.initialize.mockReset()
   sdkState.logout.mockReset()
@@ -267,6 +272,81 @@ describe('guided AuthProvider', () => {
     expect(window.location.search).toBe('')
   })
 
+  it('marks a pending sign-in attempt before the OAuth redirect', async () => {
+    rememberFirstConfig()
+    // A real initialize() redirects the whole page away, so its promise never resolves here.
+    sdkState.initialize.mockImplementation(() => new Promise(() => {}))
+
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('guest'))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    await waitFor(() => expect(sdkState.initialize).toHaveBeenCalledTimes(1))
+    expect(window.sessionStorage.getItem('process-schedule-manager.oauth.signin-attempt')).toBe('1')
+  })
+
+  it('keeps the sign-in attempt breadcrumb when initialize resolves without a session (redirect pending)', async () => {
+    rememberFirstConfig()
+    sdkState.authenticated = false
+    // A redirecting initialize() resolves before the page unloads; the breadcrumb must NOT
+    // be cleared here, or the return trip cannot surface the recovery landing.
+    sdkState.initialize.mockResolvedValue(undefined)
+
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('guest'))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    await waitFor(() => expect(sdkState.initialize).toHaveBeenCalledTimes(1))
+    expect(window.sessionStorage.getItem('process-schedule-manager.oauth.signin-attempt')).toBe('1')
+  })
+
+  it('lands on sign-in recovery when returning from a failed attempt without a session', async () => {
+    rememberFirstConfig()
+    window.sessionStorage.setItem('process-schedule-manager.oauth.signin-attempt', '1')
+    // Back from UiPath: no callback in the URL and no authenticated session.
+    sdkState.callback = false
+    sdkState.authenticated = false
+
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('signin-incomplete')).toHaveTextContent('incomplete'))
+    expect(screen.getByTestId('state')).toHaveTextContent('guest')
+    // The breadcrumb is consumed (one-shot) so it cannot re-trigger on a later load.
+    expect(window.sessionStorage.getItem('process-schedule-manager.oauth.signin-attempt')).toBeNull()
+  })
+
+  it('clears the attempt breadcrumb on a completed callback without flagging recovery', async () => {
+    rememberFirstConfig()
+    window.sessionStorage.setItem('process-schedule-manager.oauth.signin-attempt', '1')
+    window.history.replaceState(null, '', '/?code=abc&state=xyz')
+    sdkState.callback = true
+    sdkState.authenticated = true
+
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('authenticated'))
+    expect(screen.getByTestId('signin-incomplete')).toHaveTextContent('')
+    expect(window.sessionStorage.getItem('process-schedule-manager.oauth.signin-attempt')).toBeNull()
+  })
+
   it('clears callback params when OAuth callback completion fails', async () => {
     rememberFirstConfig()
     window.history.replaceState(null, '', '/?code=abc&state=xyz')
@@ -283,6 +363,34 @@ describe('guided AuthProvider', () => {
 
     expect(sdkState.completeOAuth).toHaveBeenCalledTimes(1)
     expect(window.location.search).toBe('')
+  })
+
+  it('exchanges the single-use OAuth code once under StrictMode and does not log a failure on success', async () => {
+    rememberFirstConfig()
+    window.history.replaceState(null, '', '/?code=abc&state=xyz')
+    sdkState.callback = true
+    sdkState.authenticated = true
+    // The committed exchange succeeds; a duplicate exchange of the consumed code would reject (invalid_grant).
+    sdkState.completeOAuth
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Failed to get access token: {"error":"invalid_grant"}'))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    render(
+      <StrictMode>
+        <AuthProvider>
+          <Probe />
+        </AuthProvider>
+      </StrictMode>,
+    )
+
+    await waitFor(() => expect(sdkState.completeOAuth).toHaveBeenCalled())
+    expect(sdkState.completeOAuth).toHaveBeenCalledTimes(1)
+    expect(errorSpy).not.toHaveBeenCalledWith('UiPath sign-in failed:', expect.anything())
+
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('authenticated'))
+
+    errorSpy.mockRestore()
   })
 
   it('surfaces missing required scope errors', async () => {
@@ -315,6 +423,25 @@ describe('guided AuthProvider', () => {
 
     await waitFor(() => expect(sdkState.logout).toHaveBeenCalledTimes(1))
     expect(window.localStorage.getItem('process-schedule-manager.oauth.active-auth-config-id')).toBe('second-connection-0-0')
+  })
+
+  it('clears the in-flight sign-in busy state when switching connections', async () => {
+    rememberTwoConfigs()
+    // A redirecting initialize() never resolves here, so isAuthenticating stays true until reset.
+    sdkState.initialize.mockImplementation(() => new Promise<void>(() => {}))
+
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('guest'))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    await waitFor(() => expect(screen.getByTestId('authenticating')).toHaveTextContent('busy'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch connection' }))
+    await waitFor(() => expect(screen.getByTestId('authenticating')).toHaveTextContent(''))
   })
 
   it('can save a new connection without activating it or closing the active session', async () => {

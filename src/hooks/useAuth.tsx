@@ -10,6 +10,7 @@ import {
   getAvailableAuthConfigs,
   getMissingRequiredScopes,
   getSelectedAuthConfigId,
+  REQUIRED_ORCHESTRATOR_SCOPES,
   resetCustomAuthConfigs,
   setSelectedAuthConfigId,
   updateCustomAuthConfig,
@@ -26,14 +27,17 @@ interface AuthContextType {
   addAuthConfig: (config: NewAuthConfigInput, options?: { activate?: boolean }) => StoredAuthConfig
   authConfigs: StoredAuthConfig[]
   deleteAuthConfigGroup: (groupId: string) => StoredAuthConfig[]
+  dismissSignInIncomplete: () => void
   error: string | null
   isAuthenticated: boolean
+  isAuthenticating: boolean
   isInitializing: boolean
   login: () => Promise<void>
   logout: () => void
   resetAuthConfigs: () => StoredAuthConfig[]
   sdk: UiPath | null
   selectAuthConfig: (configId: string | null) => void
+  signInIncomplete: boolean
   updateAuthConfig: (
     groupId: string,
     config: NewAuthConfigInput,
@@ -84,14 +88,11 @@ const assertConfiguredRequiredScopes = (configuredScope: string) => {
 const assertRequiredScopes = (token: string | undefined, configuredScope: string) => {
   assertConfiguredRequiredScopes(configuredScope)
   const tokenScopes = getTokenScopes(token)
-  const missingTokenScopes = configuredScope
-    .split(/\s+/)
-    .filter(Boolean)
-    .filter((scope) => !tokenScopes.has(scope))
+  const missingTokenScopes = REQUIRED_ORCHESTRATOR_SCOPES.filter((scope) => !tokenScopes.has(scope))
 
   if (missingTokenScopes.length) {
     throw new Error(
-      `UiPath token is missing configured scope(s): ${missingTokenScopes.join(', ')}. Confirm the External App includes them, then sign in again.`,
+      `UiPath token is missing required scope(s): ${missingTokenScopes.join(', ')}. Confirm the External App includes them, then sign in again.`,
     )
   }
 }
@@ -101,6 +102,59 @@ function clearOAuthRedirectQueryString(): void {
   window.history.replaceState({}, document.title, cleanCurrentUrl())
 }
 
+// A full-page OAuth redirect cedes control to UiPath; if the External App is missing a
+// requested scope, UiPath renders its own hosted error page and never redirects back. We
+// can't see that, but we can leave a same-tab breadcrumb before redirecting: if the app
+// later loads without a callback and without a session, the user came back from a failed
+// attempt and we show an in-app recovery landing. sessionStorage auto-clears on tab close,
+// so a stale breadcrumb can't haunt a future session.
+const SIGNIN_ATTEMPT_KEY = 'process-schedule-manager.oauth.signin-attempt'
+
+const getSessionStorage = (): Storage | null => {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.sessionStorage
+  } catch {
+    return null
+  }
+}
+
+const markSignInAttempt = (): void => {
+  getSessionStorage()?.setItem(SIGNIN_ATTEMPT_KEY, '1')
+}
+
+const clearSignInAttempt = (): void => {
+  getSessionStorage()?.removeItem(SIGNIN_ATTEMPT_KEY)
+}
+
+// Read-and-clear: returns whether a sign-in attempt was pending, consuming it so it fires once.
+const consumeSignInAttempt = (): boolean => {
+  const storage = getSessionStorage()
+  const wasPending = storage?.getItem(SIGNIN_ATTEMPT_KEY) === '1'
+  storage?.removeItem(SIGNIN_ATTEMPT_KEY)
+  return wasPending
+}
+
+// OAuth authorization codes are single-use (RFC 6749 §4.1.2). React StrictMode
+// double-invokes the init effect in dev, which would redeem the code twice — the
+// second redemption fails with `invalid_grant`. Memoize the exchange per config so
+// both effect runs await the SAME redemption and resolve to the one authenticated
+// instance; the surviving (non-cancelled) run delivers it to state.
+let oauthExchange: { key: string; promise: Promise<UiPath> } | null = null
+
+function completeOAuthOnce(instance: UiPath, key: string): Promise<UiPath> {
+  if (oauthExchange?.key === key) return oauthExchange.promise
+  const promise = instance.completeOAuth().then(() => instance)
+  oauthExchange = { key, promise }
+  return promise
+}
+
+// Test-only hook: reset the memoized OAuth exchange between unit tests.
+// eslint-disable-next-line react-refresh/only-export-components
+export function __resetOAuthExchangeForTests(): void {
+  oauthExchange = null
+}
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [authConfigs, setAuthConfigs] = useState<StoredAuthConfig[]>(() => getAvailableAuthConfigs())
   const [activeAuthConfigId, setActiveAuthConfigId] = useState<string | null>(() =>
@@ -108,7 +162,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   )
   const [error, setError] = useState<string | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [isInitializing, setIsInitializing] = useState(true)
+  const [signInIncomplete, setSignInIncomplete] = useState(false)
   const [sdk, setSdk] = useState<UiPath | null>(null)
 
   const activeAuthConfig = authConfigs.find((config) => config.id === activeAuthConfigId) ?? null
@@ -122,7 +178,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setIsAuthenticated(false)
+    setIsAuthenticating(false)
     setError(null)
+    setSignInIncomplete(false)
   }, [sdk])
 
   const refreshConfigs = useCallback((nextActiveId?: string | null) => {
@@ -139,7 +197,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setActiveAuthConfigId(selectedId)
     setSdk(null)
     setIsAuthenticated(false)
+    setIsAuthenticating(false)
     setError(null)
+    setSignInIncomplete(false)
 
     return nextConfigs
   }, [])
@@ -153,6 +213,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (!activeAuthConfig) {
         if (!cancelled) {
+          clearSignInAttempt()
           setSdk(null)
           setIsAuthenticated(false)
           setIsInitializing(false)
@@ -164,15 +225,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const instance = new UiPath(buildOAuthConfigFromAuthConfig(activeAuthConfig))
 
         if (instance.isInOAuthCallback()) {
+          let authed: UiPath
           try {
-            await instance.completeOAuth()
+            authed = await completeOAuthOnce(instance, activeAuthConfig.id)
           } finally {
             clearOAuthRedirectQueryString()
           }
-          assertRequiredScopes(instance.getToken(), activeAuthConfig.scope)
+          assertRequiredScopes(authed.getToken(), activeAuthConfig.scope)
 
           if (!cancelled) {
-            setSdk(instance)
+            clearSignInAttempt()
+            setSdk(authed)
             setIsAuthenticated(true)
             setIsInitializing(false)
           }
@@ -185,13 +248,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         if (!cancelled) {
+          // No callback + no session, but a sign-in attempt was pending → the user bounced
+          // back from a failed UiPath redirect (most likely the External App lacks a
+          // requested scope). Surface the in-app recovery landing instead of a bare retry.
+          if (alreadyAuthenticated) {
+            clearSignInAttempt()
+          } else if (consumeSignInAttempt()) {
+            setSignInIncomplete(true)
+          }
           setSdk(instance)
           setIsAuthenticated(alreadyAuthenticated)
           setIsInitializing(false)
         }
       } catch (err) {
-        console.error('UiPath sign-in failed:', err)
         if (!cancelled) {
+          clearSignInAttempt()
+          console.error('UiPath sign-in failed:', err)
           setError(err instanceof Error ? err.message : 'UiPath sign-in failed')
           setIsAuthenticated(false)
           setIsInitializing(false)
@@ -211,16 +283,36 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     try {
       setError(null)
+      setSignInIncomplete(false)
+      // Drives the sign-in button spinner. Stays true through the redirect (the page unloads),
+      // so the busy render is never coalesced away; only the catch below clears it, when sign-in
+      // fails locally with no redirect.
+      setIsAuthenticating(true)
       assertConfiguredRequiredScopes(activeAuthConfig.scope)
+      markSignInAttempt()
       await sdk.initialize()
-      assertRequiredScopes(sdk.getToken(), activeAuthConfig.scope)
-      setIsAuthenticated(sdk.isAuthenticated())
+      // initialize() resolves even when it has scheduled a full-page redirect to UiPath —
+      // navigation only commits once this task yields, so any code here runs first. Only
+      // finalize (and clear the breadcrumb) when a session actually exists; otherwise a
+      // redirect is pending and the breadcrumb must survive the round-trip so the return
+      // can surface the recovery landing.
+      if (sdk.isAuthenticated()) {
+        clearSignInAttempt()
+        assertRequiredScopes(sdk.getToken(), activeAuthConfig.scope)
+        setIsAuthenticated(true)
+      }
     } catch (err) {
+      clearSignInAttempt()
       const message = err instanceof UiPathError || err instanceof Error ? err.message : 'UiPath sign-in failed'
       setError(message)
       setIsAuthenticated(false)
+      setIsAuthenticating(false)
     }
   }, [activeAuthConfig, sdk])
+
+  const dismissSignInIncomplete = useCallback(() => {
+    setSignInIncomplete(false)
+  }, [])
 
   const logout = useCallback(() => {
     sdk?.logout()
@@ -289,14 +381,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         addAuthConfig,
         authConfigs,
         deleteAuthConfigGroup: deleteAuthConfigGroupHandler,
+        dismissSignInIncomplete,
         error,
         isAuthenticated,
+        isAuthenticating,
         isInitializing,
         login,
         logout,
         resetAuthConfigs: resetAuthConfigsHandler,
         sdk,
         selectAuthConfig,
+        signInIncomplete,
         updateAuthConfig: updateAuthConfigHandler,
       }}
     >

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath, URL } from 'node:url'
 
@@ -33,5 +33,10 @@ export default defineConfig({
   server: {
     port: 5177,
     strictPort: true,
+  },
+  test: {
+    env: {
+      VITE_ENABLE_TESTING_ROUTE: 'false',
+    },
   },
 })

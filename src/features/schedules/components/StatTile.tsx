@@ -2,7 +2,6 @@ import type { CSSProperties, ReactNode } from 'react'
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { formatNumber } from '../formatters'
@@ -39,13 +38,11 @@ export function StatTile({
   if (!description) return tile
 
   return (
-    <TooltipProvider delayDuration={160}>
-      <Tooltip>
-        <TooltipTrigger asChild>{tile}</TooltipTrigger>
-        <TooltipContent className="metric-tooltip-content">
-          {description}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>{tile}</TooltipTrigger>
+      <TooltipContent className="metric-tooltip-content">
+        {description}
+      </TooltipContent>
+    </Tooltip>
   )
 }

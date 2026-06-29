@@ -13,6 +13,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { getEnvironmentDisplayLabel } from '../features/schedules/constants'
 import { useAuth } from '../hooks/useAuth'
 import {
@@ -52,15 +57,19 @@ function CopyButton({ value, label }: { value: string; label: string }) {
     }
   }
   return (
-    <button
-      type="button"
-      className="connection-setup-copy"
-      onClick={handleCopy}
-      aria-label={copied ? `${label} copied` : `Copy ${label}`}
-      title={copied ? 'Copied' : 'Copy'}
-    >
-      {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="connection-setup-copy"
+          onClick={handleCopy}
+          aria-label={copied ? `${label} copied` : `Copy ${label}`}
+        >
+          {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{copied ? 'Copied' : 'Copy'}</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -311,15 +320,19 @@ export function ConnectionManager({ compact = false }: { compact?: boolean }) {
               {isSelectedActive ? 'Active' : 'Switch'}
             </button>
             {canDeleteSelectedConnection && selectedPendingConnection ? (
-              <button
-                aria-label="Delete selected connection"
-                className="icon-button connection-delete-button"
-                onClick={() => setConfirmingDeleteConnection(selectedPendingConnection)}
-                title="Delete selected connection"
-                type="button"
-              >
-                <Trash2 size={14} aria-hidden="true" />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-label="Delete selected connection"
+                    className="icon-button connection-delete-button"
+                    onClick={() => setConfirmingDeleteConnection(selectedPendingConnection)}
+                    type="button"
+                  >
+                    <Trash2 size={14} aria-hidden="true" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Delete selected connection</TooltipContent>
+              </Tooltip>
             ) : null}
           </div>
           {selectedPendingConnection ? (

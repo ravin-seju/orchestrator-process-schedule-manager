@@ -12,7 +12,6 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import {
@@ -29,6 +28,7 @@ import type {
   CalendarSpanBar,
   CalendarViewMode,
   ProcessDayGroup,
+  RuntimeStats,
   SelectedDayDetail,
   ViewMode,
 } from '../types'
@@ -114,6 +114,7 @@ export const CalendarWorkbench = memo(function CalendarWorkbench({
   navigationUnitLabel,
   onOpenDayDetail,
   onOpenMonthFromYear,
+  runtimeStats,
   setCalendarMode,
   setSelectedDayDetail,
   setViewMode,
@@ -137,6 +138,7 @@ export const CalendarWorkbench = memo(function CalendarWorkbench({
   navigationUnitLabel: string
   onOpenDayDetail: (item: ProcessDayGroup) => void
   onOpenMonthFromYear: (month: Date) => void
+  runtimeStats?: Map<number, RuntimeStats>
   setCalendarMode: (mode: CalendarViewMode) => void
   setSelectedDayDetail: (detail: SelectedDayDetail) => void
   setViewMode: (mode: ViewMode) => void
@@ -153,9 +155,8 @@ export const CalendarWorkbench = memo(function CalendarWorkbench({
   const spanMoreTop = 22 + visibleSpanLaneLimit * monthSpanLaneStepPx
 
   return (
-    <TooltipProvider delayDuration={200}>
-      <div className="calendar-panel">
-        <div className="calendar-toolbar">
+    <div className="calendar-panel">
+      <div className="calendar-toolbar">
           <div className="calendar-toolbar-copy">
             <div className="section-title-line">
               <button
@@ -263,6 +264,7 @@ export const CalendarWorkbench = memo(function CalendarWorkbench({
           calendarItemsByDay={calendarItemsByDay}
           onOpenDayDetail={onOpenDayDetail}
           onOpenTimeSlot={setSelectedDayDetail}
+          runtimeStats={runtimeStats}
           todayKey={todayKey}
         />
       ) : (
@@ -314,6 +316,5 @@ export const CalendarWorkbench = memo(function CalendarWorkbench({
         </div>
       )}
     </div>
-    </TooltipProvider>
   )
 })

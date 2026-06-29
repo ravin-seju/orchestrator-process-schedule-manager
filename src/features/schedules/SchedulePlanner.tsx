@@ -2,15 +2,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { UiPath } from '@uipath/uipath-typescript/core'
 import {
   AlertTriangle,
+  Bot,
   CalendarCheck2,
   CalendarClock,
   CheckCircle2,
   Copy,
   Folder,
+  Server,
   Zap,
 } from 'lucide-react'
 import {
   dateKey,
+  buildEffectiveScheduleMachineIds,
+  deriveFolderScopeSelection,
+  deriveMachineScopeSelection,
+  formatRobotDisplayName,
 } from './scheduleUtils'
 import {
   defaultMonthSpanLaneLimit,
@@ -20,6 +26,7 @@ import {
   iconSize,
   maxMonthSpanLaneLimit,
   minMonthSpanLaneLimit,
+  defaultTenantName,
   monthSpanLaneStepPx,
   monthSpanReservedHeightPx,
   viewModeStorageKey,
@@ -49,6 +56,7 @@ import {
 import type {
   AttentionFilter,
   CalendarViewMode,
+  MachineOption,
   ProcessDayGroup,
   SelectedDayDetail,
   StatusFilter,
@@ -56,6 +64,9 @@ import type {
   ViewMode,
   WorkspaceView,
 } from './types'
+import { useJobRuntimes } from '@/features/jobs/hooks/useJobRuntimes'
+import { fetchOData, fetchODataMetadata } from '@/features/orchestrator/odataClient'
+import { cacheClear, cacheKey } from '@/features/orchestrator/cache'
 
 const testingRouteEnabled = import.meta.env.VITE_ENABLE_TESTING_ROUTE === 'true'
 const testingConnectionTitle = testingRouteEnabled
@@ -82,6 +93,10 @@ const summaryIconForMetric = (key: SummaryMetricKey) => {
       return <CalendarCheck2 size={iconSize} aria-hidden="true" />
     case 'folders':
       return <Folder size={iconSize} aria-hidden="true" />
+    case 'machines':
+      return <Server size={iconSize} aria-hidden="true" />
+    case 'robots':
+      return <Bot size={iconSize} aria-hidden="true" />
     case 'duplicateSchedules':
       return <Copy size={iconSize} aria-hidden="true" />
     case 'stale':
@@ -109,6 +124,7 @@ function Dashboard({
     activeTenant,
     data,
     isLoading,
+    isRevalidating,
     isTestingEnvironment,
     loadError,
     refresh,
@@ -120,6 +136,7 @@ function Dashboard({
     tenantOptions,
   } = useScheduleData(sdk, configuredTenantNames)
   const { resolvedTheme, setThemeMode } = useThemeMode()
+  const runtimeTenant = activeTenant.name !== defaultTenantName ? activeTenant.name : undefined
   const [viewDate, setViewDate] = useState(() => new Date())
   const [calendarMode, setCalendarMode] = useState<CalendarViewMode>('month')
   const [viewMode, setViewMode] = useState<ViewMode>(readInitialViewMode)
@@ -133,13 +150,48 @@ function Dashboard({
   const [triggerTypeFilter, setTriggerTypeFilter] = useState<TriggerTypeFilter>('all')
   const [attentionFilter, setAttentionFilter] = useState<AttentionFilter>('none')
   const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([])
+  const [selectedMachineIds, setSelectedMachineIds] = useState<number[]>([])
+  const [selectedRobotIds, setSelectedRobotIds] = useState<number[]>([])
   const calendarGridRef = useRef<HTMLDivElement | null>(null)
+
+  const handleFullRefresh = useCallback(() => {
+    if (sdk && runtimeTenant) {
+      const org = sdk.config.orgName
+      cacheClear(cacheKey('runtimeStats', org, runtimeTenant))
+    }
+    refresh()
+  }, [sdk, runtimeTenant, refresh])
 
   useEffect(() => {
     window.localStorage.setItem(viewModeStorageKey, viewMode)
   }, [viewMode])
   const folders = data?.folders ?? emptyFolders
   const schedules = data?.schedules ?? emptySchedules
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !sdk || activeTenant.name === defaultTenantName) return
+    const tenant = activeTenant.name
+    const firstFolderId = folders[0]?.Id
+    const debugObj = {
+      fetch: (path: string, folderId?: number) => fetchOData(sdk, tenant, path, folderId),
+      metadata: () => fetchODataMetadata(sdk, tenant),
+      sessions: (folderId = firstFolderId) => fetchOData(sdk, tenant, 'Sessions?$top=10', folderId),
+      robots: (folderId = firstFolderId) => fetchOData(sdk, tenant, 'Robots?$top=10', folderId),
+    }
+    ;(window as unknown as Record<string, unknown>).__orchestratorDebug = debugObj
+    return () => { delete (window as unknown as Record<string, unknown>).__orchestratorDebug }
+  }, [sdk, activeTenant, folders])
+  const runtimeFolderIds = useMemo(
+    () => Array.from(new Set(schedules.map((s) => s.folderId))),
+    [schedules],
+  )
+  const { runtimeStats, robotNames, machineNames, scheduleMachineIds, releaseMachineIds } = useJobRuntimes(sdk, runtimeTenant, runtimeFolderIds.length ? runtimeFolderIds : undefined)
+  // Effective machine-per-schedule: direct scheduled-job machines, with release (manual-run)
+  // machines as a fallback only for schedules that have no direct association.
+  const effectiveScheduleMachineIds = useMemo(
+    () => buildEffectiveScheduleMachineIds(schedules, scheduleMachineIds, releaseMachineIds),
+    [schedules, scheduleMachineIds, releaseMachineIds],
+  )
   const statusAwareFolders = useMemo(
     () => getStatusAwareFolders(folders, schedules, statusFilter),
     [folders, schedules, statusFilter],
@@ -171,7 +223,11 @@ function Dashboard({
     attentionFilter,
     query,
     schedules,
+    scheduleMachineIds: effectiveScheduleMachineIds,
+    collisionMachineIds: scheduleMachineIds,
     selectedFolderIds,
+    selectedMachineIds,
+    selectedRobotIds,
     statusFilter,
     triggerTypeFilter,
   })
@@ -192,6 +248,7 @@ function Dashboard({
     calendarMode,
     filteredSchedules,
     monthSpanLaneLimit,
+    runtimeStats,
     selectedDayDetail,
     viewDate,
     viewMode,
@@ -209,6 +266,10 @@ function Dashboard({
     () =>
       buildSummaryMetricData({
         schedules: filteredSchedules,
+        scheduleMachineIds: effectiveScheduleMachineIds,
+        collisionMachineIds: scheduleMachineIds,
+        selectedMachineIds,
+        selectedRobotIds,
         statusFilter,
         todayEnd: todayRange.end,
         todayStart: todayRange.start,
@@ -216,7 +277,7 @@ function Dashboard({
         ...metric,
         icon: summaryIconForMetric(metric.key),
       })),
-    [filteredSchedules, statusFilter, todayRange],
+    [filteredSchedules, effectiveScheduleMachineIds, scheduleMachineIds, selectedMachineIds, selectedRobotIds, statusFilter, todayRange],
   )
   const activeMetricKey: SummaryMetricKey | null =
     attentionFilter === 'duplicates'
@@ -226,6 +287,57 @@ function Dashboard({
         : attentionFilter === 'collisions'
           ? 'collisions'
           : null
+  const robotOptions = useMemo(() => {
+    // Narrow robot options to robots used by the current scope: when a machine is selected,
+    // robots that ran on that machine; when folder(s) are selected, robots used in those
+    // folders. Both are drill-down aids (option-list only — never auto-apply a robot filter,
+    // see handleMachineSelection). When both are active the two sets INTERSECT.
+    const machineScopeRobots = selectedMachineIds.length
+      ? new Set(deriveMachineScopeSelection(schedules, effectiveScheduleMachineIds, selectedMachineIds).robotIds)
+      : null
+    const folderScopeRobots = selectedFolderIds.length
+      ? new Set(deriveFolderScopeSelection(schedules, effectiveScheduleMachineIds, selectedFolderIds).robotIds)
+      : null
+    const seen = new Set<number>()
+    const options: { id: number; name: string }[] = []
+    for (const s of schedules) {
+      for (const mr of s.MachineRobots ?? []) {
+        if (mr.RobotId != null && !seen.has(mr.RobotId)) {
+          if (machineScopeRobots && !machineScopeRobots.has(mr.RobotId)) continue
+          if (folderScopeRobots && !folderScopeRobots.has(mr.RobotId)) continue
+          seen.add(mr.RobotId)
+          // Prefer the canonical Robot.Name (from Jobs $expand=Robot), shortened to the
+          // account portion to match the Orchestrator UI; fall back to the Domain\Username
+          // on MachineRobots, then a synthetic label.
+          const canonical = robotNames.get(mr.RobotId)
+          const name = canonical ? formatRobotDisplayName(canonical) : (mr.RobotUserName ?? `Robot ${mr.RobotId}`)
+          options.push({ id: mr.RobotId, name })
+        }
+      }
+    }
+    return options.sort((a, b) => a.name.localeCompare(b.name))
+  }, [schedules, robotNames, selectedMachineIds, selectedFolderIds, effectiveScheduleMachineIds])
+  // Machine options come from JOB HISTORY (the machines schedules actually ran on),
+  // not the schedule's configured MachineRobots — which on dynamic-allocation tenants is
+  // null (machine resolved at runtime) and never reflects where work runs. Name-only:
+  // machine state/type is unavailable on these tenants (Sessions 403s), so there is no
+  // inventory to enrich with. When folder(s) are selected, narrow to the machines used in
+  // those folders (option-list only — mirrors robot narrowing; never auto-applies a filter).
+  const machineOptions = useMemo<MachineOption[]>(() => {
+    const folderScopeMachines = selectedFolderIds.length
+      ? new Set(deriveFolderScopeSelection(schedules, effectiveScheduleMachineIds, selectedFolderIds).machineIds)
+      : null
+    const runtimeMachineIds = new Set<number>()
+    for (const ids of effectiveScheduleMachineIds.values()) {
+      for (const id of ids) runtimeMachineIds.add(id)
+    }
+    const options: MachineOption[] = []
+    for (const id of runtimeMachineIds) {
+      if (folderScopeMachines && !folderScopeMachines.has(id)) continue
+      options.push({ id, name: machineNames.get(id) ?? `Machine ${id}` })
+    }
+    return options.sort((a, b) => a.name.localeCompare(b.name))
+  }, [schedules, selectedFolderIds, effectiveScheduleMachineIds, machineNames])
   const handleMetricClick = useCallback(
     (key: SummaryMetricKey) => {
       setSelectedDayDetail(null)
@@ -243,10 +355,37 @@ function Dashboard({
         setSelectedFolderIds([])
         return
       }
-      const matches = applyAttentionFilter(preAttentionSchedules, next)
+      const matches = applyAttentionFilter(
+        preAttentionSchedules,
+        next,
+        selectedMachineIds.length ? new Set(selectedMachineIds) : undefined,
+        selectedRobotIds.length ? new Set(selectedRobotIds) : undefined,
+        scheduleMachineIds,
+      )
       setSelectedFolderIds(Array.from(new Set(matches.map((s) => String(s.folderId)))))
     },
-    [attentionFilter, preAttentionSchedules],
+    [attentionFilter, preAttentionSchedules, selectedMachineIds, selectedRobotIds, scheduleMachineIds],
+  )
+  // Selecting a machine auto-narrows the FOLDER picker to where that machine is active
+  // (mirrors the metric-tile → folder auto-narrow), and narrows the robot picker's OPTION
+  // list (below) — but does not auto-apply a robot filter, since machine data (Jobs) and
+  // robot data (inline config) have different coverage and auto-selecting robots would
+  // hide machine-matched schedules that use dynamic allocation. Clearing resets folders.
+  const handleMachineSelection = useCallback(
+    (nextMachineIds: number[]) => {
+      setSelectedMachineIds(nextMachineIds)
+      if (!nextMachineIds.length) {
+        setSelectedFolderIds([])
+        return
+      }
+      const { folderIds } = deriveMachineScopeSelection(
+        schedules,
+        effectiveScheduleMachineIds,
+        nextMachineIds,
+      )
+      setSelectedFolderIds(folderIds)
+    },
+    [schedules, effectiveScheduleMachineIds],
   )
   const attentionChipLabel: Record<Exclude<AttentionFilter, 'none'>, string> = {
     collisions: 'Collisions only',
@@ -362,6 +501,7 @@ function Dashboard({
         environmentDisplayLabel={environmentDisplayLabel}
         headerFilterChips={headerFilterChips}
         isLoading={isLoading}
+        isRevalidating={isRevalidating}
         metrics={summaryMetrics}
         nextThemeLabel={nextThemeLabel}
         onManageConnection={onManageConnection}
@@ -372,7 +512,7 @@ function Dashboard({
           setSelectedDayDetail(null)
           setIsUpcomingExpanded(false)
         }}
-        refresh={refresh}
+        refresh={handleFullRefresh}
         resolvedTheme={resolvedTheme}
         selectedStressCount={selectedStressCount}
         selectedTenant={selectedTenant}
@@ -399,6 +539,12 @@ function Dashboard({
         statusAwareFolders={statusAwareFolders}
         triggerTypeFilter={triggerTypeFilter}
         workspaceView={workspaceView}
+        machines={machineOptions}
+        selectedMachineIds={selectedMachineIds}
+        setSelectedMachineIds={handleMachineSelection}
+        robotOptions={robotOptions}
+        selectedRobotIds={selectedRobotIds}
+        setSelectedRobotIds={setSelectedRobotIds}
       />
 
       {workspaceView === 'calendar' ? (
@@ -418,6 +564,7 @@ function Dashboard({
             navigationUnitLabel={navigationUnitLabel}
             onOpenDayDetail={openDayDetail}
             onOpenMonthFromYear={openMonthFromYear}
+            runtimeStats={runtimeStats}
             setCalendarMode={setCalendarMode}
             setSelectedDayDetail={openSelectedDayDetail}
             setViewMode={setViewMode}
@@ -442,10 +589,20 @@ function Dashboard({
             onToggleExpanded={() => setIsUpcomingExpanded((current) => !current)}
             selectedDayOccurrences={selectedDayOccurrences}
             upcomingDisplayGroups={upcomingDisplayGroups}
+            runtimeStats={runtimeStats}
+            robotNames={robotNames}
+            machineNames={machineNames}
+            scheduleMachineIds={effectiveScheduleMachineIds}
           />
         </section>
       ) : (
-        <ScheduleTable schedules={filteredSchedules} className="inventory-view" />
+        <ScheduleTable
+          schedules={filteredSchedules}
+          className="inventory-view"
+          robotNames={robotNames}
+          machineNames={machineNames}
+          scheduleMachineIds={effectiveScheduleMachineIds}
+        />
       )}
     </main>
   )

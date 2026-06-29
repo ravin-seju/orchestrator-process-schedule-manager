@@ -17,6 +17,11 @@ const jsonResponse = (payload: unknown, status = 200) =>
     status,
   })
 
+const textResponse = (text: string, status: number) => new Response(text, { status })
+
+const tenantsFetched = (fetchMock: ReturnType<typeof vi.fn>) =>
+  fetchMock.mock.calls.some((call) => String(call[0]).includes('/Tenants?'))
+
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllEnvs()
@@ -24,124 +29,139 @@ afterEach(() => {
 })
 
 describe('browser Orchestrator client', () => {
-  it('loads dynamic tenants with the SDK OAuth token', async () => {
-    const fetchMock = vi.fn(async () =>
-      jsonResponse({ value: [{ DisplayName: 'Demo Tenant', Name: 'Demo' }] }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
+  describe('loadTenants (configured-only, no discovery)', () => {
+    it('returns the configured tenant without calling the /Tenants discovery endpoint', async () => {
+      const fetchMock = vi.fn(async () => jsonResponse({ value: [] }))
+      vi.stubGlobal('fetch', fetchMock)
 
-    await expect(loadTenants(sdk)).resolves.toEqual({
-      tenants: [{ displayName: 'Demo Tenant', name: 'Demo', source: 'dynamic' }],
+      await expect(loadTenants(sdk)).resolves.toEqual({
+        tenants: [{ displayName: 'Demo', name: 'Demo', source: 'configured' }],
+      })
+
+      // /odata/Tenants needs host-admin scope this app never holds — never call it.
+      expect(fetchMock).not.toHaveBeenCalled()
     })
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://staging.api.uipath.com/ravinseju/Demo/orchestrator_/odata/Tenants?$top=100',
-      {
-        headers: {
-          Accept: 'application/json',
-          Authorization: 'Bearer oauth-token',
+    it('prefers saved connection tenants over the active SDK tenant, still without discovery', async () => {
+      const fetchMock = vi.fn(async () => jsonResponse({ value: [] }))
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(loadTenants(sdk, ['Finance', 'Payroll'])).resolves.toEqual({
+        tenants: [
+          { displayName: 'Finance', name: 'Finance', source: 'configured' },
+          { displayName: 'Payroll', name: 'Payroll', source: 'configured' },
+          { displayName: 'Demo', name: 'Demo', source: 'configured' },
+        ],
+      })
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('loadProcessSchedules', () => {
+    it('loads good folders and skips inaccessible ones, without /Tenants discovery', async () => {
+      const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const requestUrl = String(url)
+        const folderId = (init?.headers as Record<string, string> | undefined)?.['X-UIPATH-OrganizationUnitId']
+
+        if (requestUrl.includes('/Folders?')) {
+          return jsonResponse({
+            value: [
+              { DisplayName: 'Shared', FullyQualifiedName: 'Shared', Id: 101, Key: 'folder-101' },
+              { DisplayName: 'Finance', FullyQualifiedName: 'Finance', Id: 202, Key: 'folder-202' },
+            ],
+          })
+        }
+
+        if (requestUrl.includes('/ProcessSchedules?') && folderId === '101') {
+          return jsonResponse({
+            value: [{ Enabled: true, Id: 1, Name: 'Daily Trigger', StartProcessCronSummary: 'At 10:00 AM' }],
+          })
+        }
+
+        return jsonResponse({ error: { message: 'Folder denied' } }, 403)
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const result = await loadProcessSchedules(sdk, 'Demo')
+
+      expect(result.schedules).toEqual([
+        {
+          Enabled: true,
+          Id: 1,
+          Name: 'Daily Trigger',
+          StartProcessCronSummary: 'At 10:00 AM',
+          folderId: 101,
+          folderName: 'Shared',
         },
-      },
-    )
-  })
-
-  it('falls back to configured tenants when dynamic discovery is denied', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'Denied' }, 403)))
-
-    await expect(loadTenants(sdk)).resolves.toEqual({
-      tenants: [
-        { displayName: 'Demo', name: 'Demo', source: 'configured' },
-      ],
-    })
-  })
-
-  it('derives OData API host from the selected SDK connection instead of a global env override', async () => {
-    vi.stubEnv('VITE_UIPATH_API_BASE_URL', 'https://staging.api.uipath.com')
-    const cloudSdk = {
-      config: {
-        baseUrl: 'https://cloud.uipath.com',
-        orgName: 'customerorg',
-        tenantName: 'DefaultTenant',
-      },
-      getToken: () => 'oauth-token',
-    } as unknown as UiPath
-    const fetchMock = vi.fn(async () =>
-      jsonResponse({ value: [{ DisplayName: 'Default Tenant', Name: 'DefaultTenant' }] }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(loadTenants(cloudSdk)).resolves.toEqual({
-      tenants: [{ displayName: 'Default Tenant', name: 'DefaultTenant', source: 'dynamic' }],
+      ])
+      expect(result.tenant).toEqual({ displayName: 'Demo', name: 'Demo', source: 'configured' })
+      expect(tenantsFetched(fetchMock)).toBe(false)
     })
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.uipath.com/customerorg/DefaultTenant/orchestrator_/odata/Tenants?$top=100',
-      {
-        headers: {
-          Accept: 'application/json',
-          Authorization: 'Bearer oauth-token',
+    it('follows @odata.nextLink to load every page of folders', async () => {
+      const fetchMock = vi.fn(async (url: string | URL | Request) => {
+        const requestUrl = String(url)
+        if (requestUrl.includes('/Folders?')) {
+          if (requestUrl.includes('$skiptoken=page2')) {
+            return jsonResponse({ value: [{ DisplayName: 'B', FullyQualifiedName: 'B', Id: 2, Key: 'folder-2' }] })
+          }
+          return jsonResponse({
+            '@odata.nextLink':
+              'https://staging.api.uipath.com/ravinseju/Demo/orchestrator_/odata/Folders?$skiptoken=page2',
+            value: [{ DisplayName: 'A', FullyQualifiedName: 'A', Id: 1, Key: 'folder-1' }],
+          })
+        }
+        return jsonResponse({ value: [] })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const result = await loadProcessSchedules(sdk, 'Demo')
+
+      expect(result.folders.map((folder) => folder.Id)).toEqual([1, 2])
+    })
+
+    it('targets the derived OData API host for the selected connection', async () => {
+      const cloudSdk = {
+        config: {
+          baseUrl: 'https://cloud.uipath.com',
+          orgName: 'customerorg',
+          tenantName: 'DefaultTenant',
         },
-      },
-    )
-  })
+        getToken: () => 'oauth-token',
+      } as unknown as UiPath
+      let foldersUrl: string | undefined
+      const fetchMock = vi.fn(async (url: string | URL | Request) => {
+        const requestUrl = String(url)
+        if (requestUrl.includes('/Folders?')) foldersUrl = requestUrl
+        return jsonResponse({ value: [] })
+      })
+      vi.stubGlobal('fetch', fetchMock)
 
-  it('prefers saved connection tenants over the active SDK tenant when discovery is denied', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'Denied' }, 403)))
+      await loadProcessSchedules(cloudSdk, 'DefaultTenant')
 
-    await expect(loadTenants(sdk, ['Finance', 'Payroll'])).resolves.toEqual({
-      tenants: [
-        { displayName: 'Finance', name: 'Finance', source: 'configured' },
-        { displayName: 'Payroll', name: 'Payroll', source: 'configured' },
-        { displayName: 'Demo', name: 'Demo', source: 'configured' },
-      ],
+      expect(foldersUrl).toBe(
+        'https://api.uipath.com/customerorg/DefaultTenant/orchestrator_/odata/Folders?$select=Id,Key,DisplayName,FullyQualifiedName&$orderby=FullyQualifiedName&$top=1000',
+      )
     })
-  })
 
-  it('loads folders and schedules while preserving failed folder warnings', async () => {
-    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-      const requestUrl = String(url)
-      const folderId = (init?.headers as Record<string, string> | undefined)?.['X-UIPATH-OrganizationUnitId']
+    it('throws a not-available error when the tenant is not in the configured set (no discovery fallback)', async () => {
+      const fetchMock = vi.fn(async () => jsonResponse({ value: [] }))
+      vi.stubGlobal('fetch', fetchMock)
 
-      if (requestUrl.includes('/Tenants?')) {
-        return jsonResponse({ value: [{ Name: 'Demo' }] })
-      }
-
-      if (requestUrl.includes('/Folders?')) {
-        return jsonResponse({
-          value: [
-            { DisplayName: 'Shared', FullyQualifiedName: 'Shared', Id: 101, Key: 'folder-101' },
-            { DisplayName: 'Finance', FullyQualifiedName: 'Finance', Id: 202, Key: 'folder-202' },
-          ],
-        })
-      }
-
-      if (requestUrl.includes('/ProcessSchedules?') && folderId === '101') {
-        return jsonResponse({
-          value: [{ Enabled: true, Id: 1, Name: 'Daily Trigger', StartProcessCronSummary: 'At 10:00 AM' }],
-        })
-      }
-
-      return jsonResponse({ error: { message: 'Folder denied' } }, 403)
+      await expect(loadProcessSchedules(sdk, 'Unconfigured')).rejects.toThrow(/not available/i)
+      expect(tenantsFetched(fetchMock)).toBe(false)
     })
-    vi.stubGlobal('fetch', fetchMock)
 
-    const result = await loadProcessSchedules(sdk, 'Demo')
+    it('surfaces a tenant-not-found error when the Folders request returns 404', async () => {
+      const fetchMock = vi.fn(async (url: string | URL | Request) => {
+        if (String(url).includes('/Folders?')) {
+          return textResponse('Service: orchestrator not found in Organization: ravinseju Tenant: demo', 404)
+        }
+        return jsonResponse({ value: [] })
+      })
+      vi.stubGlobal('fetch', fetchMock)
 
-    expect(result.schedules).toEqual([
-      {
-        Enabled: true,
-        Id: 1,
-        Name: 'Daily Trigger',
-        StartProcessCronSummary: 'At 10:00 AM',
-        folderId: 101,
-        folderName: 'Shared',
-      },
-    ])
-    expect(result.failedFolders).toEqual([
-      {
-        folder: { DisplayName: 'Finance', FullyQualifiedName: 'Finance', Id: 202, Key: 'folder-202' },
-        message: 'Folder denied',
-      },
-    ])
+      await expect(loadProcessSchedules(sdk, 'Demo')).rejects.toThrow(/Demo.*not found or is not accessible/i)
+    })
   })
 })

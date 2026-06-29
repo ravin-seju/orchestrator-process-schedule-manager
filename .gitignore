@@ -14,7 +14,7 @@ dist-ssr
 .env.local
 *.local
 CLAUDE.md
-docs/*
+orchestrator-swagger.json
 
 # Editor directories and files
 .vscode/*
@@ -29,3 +29,9 @@ docs/*
 .claude/*
 .uipath/*
 *.pdf
+
+# Playwright MCP probe output (may contain tenant PII)
+.playwright-mcp/*
+
+# Local handoff / working docs (not part of the app)
+docs/

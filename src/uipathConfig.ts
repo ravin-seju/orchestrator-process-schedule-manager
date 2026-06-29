@@ -5,6 +5,8 @@ export const REQUIRED_ORCHESTRATOR_SCOPES = [
   'OR.Folders.Read',
   'OR.Execution.Read',
   'OR.Jobs.Read',
+  'OR.Machines.Read',
+  'OR.Robots.Read',
 ] as const
 export const REQUIRED_ORCHESTRATOR_SCOPE_TEXT = REQUIRED_ORCHESTRATOR_SCOPES.join(' ')
 
@@ -61,6 +63,7 @@ export type ConnectionDefaults = {
 
 const CUSTOM_AUTH_CONFIGS_STORAGE_KEY = 'process-schedule-manager.oauth.custom-auth-configs'
 const ACTIVE_AUTH_CONFIG_STORAGE_KEY = 'process-schedule-manager.oauth.active-auth-config-id'
+const SCOPES_ACKNOWLEDGED_STORAGE_KEY = 'process-schedule-manager.oauth.scopes-acknowledged'
 
 const getStorage = () => {
   if (typeof window === 'undefined') return null
@@ -89,6 +92,35 @@ export function parseScopes(scope: string): string[] {
 export function getMissingRequiredScopes(scope: string): string[] {
   const configuredScopes = new Set(parseScopes(scope))
   return REQUIRED_ORCHESTRATOR_SCOPES.filter((requiredScope) => !configuredScopes.has(requiredScope))
+}
+
+// One-time-per-connection acknowledgment that the External App must grant all required scopes.
+// Keyed by groupId because the scope grant lives on the External App (one clientId = one group),
+// shared across that group's tenant entries. Used to show the confirm step once, not every sign-in.
+function readAcknowledgedScopeGroupIds(): string[] {
+  const storage = getStorage()
+  if (!storage) return []
+
+  try {
+    const raw = storage.getItem(SCOPES_ACKNOWLEDGED_STORAGE_KEY)
+    const parsed = raw ? (JSON.parse(raw) as unknown) : []
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+export function isScopeAcknowledged(groupId: string): boolean {
+  return readAcknowledgedScopeGroupIds().includes(groupId)
+}
+
+export function acknowledgeScopeGroup(groupId: string): void {
+  const storage = getStorage()
+  if (!storage || !groupId) return
+
+  const acknowledged = new Set(readAcknowledgedScopeGroupIds())
+  acknowledged.add(groupId)
+  storage.setItem(SCOPES_ACKNOWLEDGED_STORAGE_KEY, JSON.stringify([...acknowledged]))
 }
 
 export function deriveApiBaseUrl(urlApp: string): string {
@@ -150,7 +182,9 @@ function sanitizeExternalApps(
     .map((externalApp) => ({
       clientId: externalApp.clientId.trim(),
       name: externalApp.name.trim(),
-      scope: forceRequiredScope ? REQUIRED_ORCHESTRATOR_SCOPE_TEXT : externalApp.scope.trim(),
+      scope: forceRequiredScope
+        ? [...new Set([...parseScopes(REQUIRED_ORCHESTRATOR_SCOPE_TEXT), ...parseScopes(externalApp.scope)])].join(' ')
+        : externalApp.scope.trim(),
       urlAppRedirect: externalApp.urlAppRedirect.trim(),
     }))
     .filter((externalApp) => externalApp.clientId)
@@ -348,6 +382,7 @@ export function resetCustomAuthConfigs(): StoredAuthConfig[] {
   const storage = getStorage()
   storage?.removeItem(CUSTOM_AUTH_CONFIGS_STORAGE_KEY)
   storage?.removeItem(ACTIVE_AUTH_CONFIG_STORAGE_KEY)
+  storage?.removeItem(SCOPES_ACKNOWLEDGED_STORAGE_KEY)
 
   return getAvailableAuthConfigs()
 }
