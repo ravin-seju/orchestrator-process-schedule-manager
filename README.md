@@ -7,12 +7,14 @@ A browser-only schedule viewer for UiPath Orchestrator. It surfaces upcoming run
 - **Calendar Workbench** — Year, Month, and Week views for time-based triggers. Click a date in Year view to drop straight into that week.
 - **Layout modes** — Switch between Bars (recurring span bands) and Blocks (per-day chips) for month and week views.
 - **Upcoming panel** — Next 7 days of scheduled runs in a dedicated side panel.
+- **Run insights** — The day detail panel shows each run's timezone, runtime statistics (median and p90 duration over recent runs), the resolved robots, and the machines it ran on (large dynamic pools collapse to "N machines").
+- **Machine & robot awareness** — Filter schedules by the machine they actually run on (inferred from job history) and by assigned robot, with search-enabled pickers; selecting machines or folders narrows the related pickers. Distinct machine and robot counts appear as header metric tiles.
 - **Actionable insights** — One-click filters in the header for Duplicates, Stale (no upcoming run), and Same-minute Collisions; clicking auto-narrows the folder picker to the affected folders.
 - **Queue trigger awareness** — Queue-driven triggers are detected via `QueueDefinitionId` and surfaced as a distinct trigger type, with no false time-based occurrences on the calendar.
-- **Guided sign-in** — Add and remember a connection in the browser, with copy-to-clipboard helpers for the External App configuration values.
-- **Direct Orchestrator reads** — Uses the SDK token for browser OData calls (folders, triggers, jobs, queue definitions).
-- **Advanced filtering** — Search, hierarchical multi-folder selection, trigger type (Minute / Hourly / Daily / Weekly / Monthly / Queue / Other), and Enabled / All / Disabled.
-- **Trigger Inventory** — Tabular view with name, process, folder, trigger type, cron pattern, and status; folder color rail on every row.
+- **Advanced filtering** — Search, hierarchical multi-folder selection, machine and robot, trigger type (Minute / Hourly / Daily / Weekly / Monthly / Queue / Other), and Enabled / All / Disabled.
+- **Trigger Inventory** — Tabular view with name, process, folder, machine, robot, trigger type, cron pattern, and status; folder color rail on every row.
+- **Hardened sign-in** — Add and remember a connection with copy-to-clipboard helpers for the External App values; a one-time per-connection scope-confirmation card, and a recovery page if Orchestrator rejects the requested scopes.
+- **Direct Orchestrator reads** — Uses the SDK token for browser OData calls (folders, triggers, jobs, queue definitions, and 30-day job history for runtime stats and machine inference).
 - **Responsive dark mode** — Loads from system theme.
 
 ## Prerequisites
@@ -20,8 +22,10 @@ A browser-only schedule viewer for UiPath Orchestrator. It surfaces upcoming run
 Create a **non-confidential** External Application in your UiPath organization with these Orchestrator API user scopes:
 
 ```text
-OR.Folders.Read OR.Execution.Read OR.Jobs.Read
+OR.Folders.Read OR.Execution.Read OR.Jobs.Read OR.Machines.Read OR.Robots.Read
 ```
+
+All five scopes are required. The app blocks sign-in until the External App grants every scope, and shows a recovery page if Orchestrator rejects any of them.
 
 ### Orchestrator roles
 
@@ -33,7 +37,7 @@ OR.Folders.Read OR.Execution.Read OR.Jobs.Read
 - Jobs
 - Processes
 
-Assign this role on each folder the user should see. No default UiPath role covers this exact read-only set.
+Assign this role on each folder the user should see. No default UiPath role covers this exact read-only set. Machine and robot details are derived from job history (`Jobs`) and trigger configuration (`Triggers`), so the permissions above already cover them — no separate machine or robot role is needed.
 
 **App deployers and schedule admins** — assign the `Folder Administrator` default role on the target folder, plus `Allow to Be Folder Administrator` at tenant level. This grants the `Apps.Create`/`Apps.Edit` permissions required by the deploy CLI, and full trigger management for users who also create or edit schedules.
 
