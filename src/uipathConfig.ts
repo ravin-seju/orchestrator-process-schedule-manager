@@ -258,7 +258,10 @@ function readCustomAuthConfigGroups(): StoredAuthConfigGroup[] {
 
         return {
           ...group,
-          externalApps: sanitizeExternalApps(group.externalApps ?? []),
+          // Heal stored scopes on read, exactly as the add/update write paths do — a connection
+          // saved before a scope became required must request the current required set, or it would
+          // be stranded with a disabled sign-in. Idempotent union; preserves any extra user scopes.
+          externalApps: sanitizeExternalApps(group.externalApps ?? [], { forceRequiredScope: true }),
           organization,
           organizationSlug,
           source: 'custom' as const,
