@@ -222,6 +222,35 @@ describe('UiPath connection config', () => {
     expect(getMissingRequiredScopes(REQUIRED_ORCHESTRATOR_SCOPE_TEXT)).toEqual([])
   })
 
+  it('heals legacy saved scopes to the full required set on read so sign-in is not stranded', () => {
+    window.localStorage.setItem(
+      'process-schedule-manager.oauth.custom-auth-configs',
+      JSON.stringify([
+        {
+          externalApps: [
+            {
+              clientId: 'client-id',
+              name: 'Legacy App',
+              scope: 'OR.Folders.Read OR.Execution.Read OR.Jobs.Read',
+              urlAppRedirect: 'http://localhost:5175',
+            },
+          ],
+          id: 'legacy-invalid',
+          organization: 'ravinseju',
+          source: 'custom',
+          tenants: ['Demo'],
+          urlApp: 'https://staging.uipath.com',
+          urlBase: 'https://staging.api.uipath.com',
+        },
+      ]),
+    )
+
+    const [config] = getAvailableAuthConfigs()
+
+    expect(config.scope).toBe(REQUIRED_ORCHESTRATOR_SCOPE_TEXT)
+    expect(getMissingRequiredScopes(config.scope)).toEqual([])
+  })
+
   it('records per-group scope acknowledgment and clears it on reset', () => {
     expect(isScopeAcknowledged('group-a')).toBe(false)
 

@@ -393,8 +393,11 @@ describe('guided AuthProvider', () => {
     errorSpy.mockRestore()
   })
 
-  it('surfaces missing required scope errors', async () => {
+  it('heals legacy saved scopes on read so sign-in is not stranded', async () => {
     rememberLegacyInvalidConfig()
+    sdkState.initialize.mockImplementation(async () => {
+      sdkState.authenticated = true
+    })
 
     render(
       <AuthProvider>
@@ -405,7 +408,10 @@ describe('guided AuthProvider', () => {
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('guest'))
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
-    await waitFor(() => expect(screen.getByTestId('error')).toHaveTextContent('OR.Jobs.Read'))
+    // The legacy config's scope was healed to the full required set on read, so the pre-login
+    // configured-scope check passes and OAuth proceeds instead of surfacing a missing-scope error.
+    await waitFor(() => expect(sdkState.initialize).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId('error')).toHaveTextContent('')
   })
 
   it('clears the previous SDK session when switching saved connections', async () => {
