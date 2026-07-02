@@ -73,6 +73,33 @@ Supported variable:
 VITE_ENABLE_TESTING_ROUTE=false
 ```
 
+### UiPath CLI (for deployment)
+
+Deploying to Orchestrator (see [Deployment](#deployment)) uses the **UiPath CLI (`uip`)**. Install it globally with npm (requires Node.js) — see the [`@uipath/cli` package](https://www.npmjs.com/package/@uipath/cli) for full details:
+
+```bash
+npm install -g @uipath/cli
+uip --version
+```
+
+Then log in and select the tenant you want to deploy to. Either log in interactively and pick the tenant from a list:
+
+```bash
+uip login --interactive
+```
+
+…or target a specific organization and tenant non-interactively:
+
+```bash
+uip login --organization <org-name> --tenant <tenant-name>
+```
+
+Confirm the active session (organization and tenant) before deploying:
+
+```bash
+uip login status
+```
+
 ## Security & data model
 
 - The browser app uses a non-confidential External App. It does not use or store a client secret.
@@ -90,6 +117,14 @@ uip codedapp pack dist --name "Process Schedule Manager" --version <version>
 uip codedapp publish --name "Process Schedule Manager" --version <version> --type Web
 uip codedapp deploy --name "Process Schedule Manager" --version <version> --folder-key <folder-key>
 ```
+
+The `--folder-key` is the target folder's **Key (GUID)**, not its display name. Look it up by folder path and read the `Key` field from the output:
+
+```bash
+uip or folders get "Shared/My Folder" --output json
+```
+
+Copy the `"Key"` value into `<folder-key>` in the deploy command above (replace `Shared/My Folder` with your target folder path).
 
 The account running these commands must have the `Folder Administrator` role on the target folder. See [Orchestrator roles](#orchestrator-roles) in Prerequisites.
 
