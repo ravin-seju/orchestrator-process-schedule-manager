@@ -75,7 +75,7 @@ VITE_ENABLE_TESTING_ROUTE=false
 
 ### UiPath CLI (for deployment)
 
-Deploying to Orchestrator (see [Deployment](#deployment)) uses the **UiPath CLI (`uip`)**. Install it globally with npm (requires Node.js) — see the [`@uipath/cli` package](https://www.npmjs.com/package/@uipath/cli) for full details:
+Deploying to Orchestrator (see [Deployment](#deployment)) uses the **UiPath CLI (`uip`)**. Install it globally with npm (requires Node.js) — see the `@uipath/cli` [package](https://www.npmjs.com/package/@uipath/cli) for full details:
 
 ```bash
 npm install -g @uipath/cli
