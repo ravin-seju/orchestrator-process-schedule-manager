@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
 import { BrandLockup } from './components/BrandLockup'
 import { ConnectionManager } from './components/ConnectionManager'
+import { WhatsNewDialog } from './components/WhatsNewDialog'
 import {
   Dialog,
   DialogContent,
@@ -301,6 +302,7 @@ function AuthenticatedPlanner() {
         sdk={sdk}
         onManageConnection={() => setIsConnectionDialogOpen(true)}
       />
+      <WhatsNewDialog />
       {isConnectionDialogOpen ? <ConnectionSettingsDialog onClose={() => setIsConnectionDialogOpen(false)} /> : null}
     </>
   )

@@ -12,6 +12,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { APP_VERSION } from '@/whatsNew'
 import { formatNumber } from '../formatters'
 import { iconSize } from '../constants'
 import type { TenantOption } from '../types'
@@ -91,10 +92,10 @@ export function AppHeader({
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="version-badge title-version-badge">
-                  v1.1
+                  v{APP_VERSION}
                 </span>
               </TooltipTrigger>
-              <TooltipContent>Application version 1.1</TooltipContent>
+              <TooltipContent>Application version {APP_VERSION}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>

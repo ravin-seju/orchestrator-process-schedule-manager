@@ -573,6 +573,57 @@ body {
   width: 34px;
 }
 
+.whats-new-body {
+  display: grid;
+  gap: 16px;
+}
+
+.whats-new-section h3 {
+  color: var(--text-strong);
+  font-size: var(--font-sm);
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.whats-new-section ul {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.whats-new-item {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+}
+
+.whats-new-item-icon {
+  color: var(--accent);
+  flex: none;
+  margin-top: 2px;
+}
+
+.whats-new-item-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.whats-new-item-copy strong {
+  color: var(--text);
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+.whats-new-item-copy span {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  line-height: 1.45;
+}
+
 .app-fallback {
   display: grid;
   min-height: 100svh;
