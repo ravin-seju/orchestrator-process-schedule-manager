@@ -113,9 +113,9 @@ uip login status
 Package, publish, and deploy with the UiPath CLI:
 
 ```bash
-uip codedapp pack dist --name "Process Schedule Manager" --version <version>
-uip codedapp publish --name "Process Schedule Manager" --version <version> --type Web
-uip codedapp deploy --name "Process Schedule Manager" --version <version> --folder-key <folder-key>
+uip codedapp pack dist --name "process-schedule-manager" --version <version>
+uip codedapp publish --name "process-schedule-manager" --version <version> --type Web
+uip codedapp deploy --name "process-schedule-manager" --version <version> --folder-key <folder-key>
 ```
 
 The `--folder-key` is the target folder's **Key (GUID)**, not its display name. Look it up by folder path and read the `Key` field from the output:
