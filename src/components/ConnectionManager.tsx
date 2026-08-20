@@ -23,7 +23,6 @@ import { useAuth } from '../hooks/useAuth'
 import {
   deriveApiBaseUrl,
   getConnectionDefaults,
-  getMissingRequiredScopes,
   REQUIRED_ORCHESTRATOR_SCOPES,
   REQUIRED_ORCHESTRATOR_SCOPE_TEXT,
 } from '../uipathConfig'
@@ -135,10 +134,6 @@ export function ConnectionManager({ compact = false }: { compact?: boolean }) {
   const [confirmingConnection, setConfirmingConnection] = useState<StoredAuthConfig | null>(null)
   const [confirmingDeleteConnection, setConfirmingDeleteConnection] = useState<StoredAuthConfig | null>(null)
   const formTenants = useMemo(() => parseTenants(form.tenants), [form.tenants])
-  const activeConfigMissingScopes = useMemo(
-    () => (activeAuthConfig ? getMissingRequiredScopes(activeAuthConfig.scope) : []),
-    [activeAuthConfig],
-  )
   const derivedApiBaseUrl = useMemo(() => deriveApiBaseUrl(form.urlApp), [form.urlApp])
   const setupRedirectUri = form.redirectUri.trim() || getConnectionDefaults().redirectUri
   const canSave =
@@ -244,9 +239,6 @@ export function ConnectionManager({ compact = false }: { compact?: boolean }) {
     savedConnectionOptions.find((config) => config.groupId === activeAuthConfig?.groupId) ??
     savedConnectionOptions[0] ??
     null
-  const selectedConnectionMissingScopes = selectedPendingConnection
-    ? getMissingRequiredScopes(selectedPendingConnection.scope)
-    : []
   const isSelectedActive = Boolean(
     activeAuthConfig &&
     selectedPendingConnection &&
@@ -338,9 +330,6 @@ export function ConnectionManager({ compact = false }: { compact?: boolean }) {
           {selectedPendingConnection ? (
             <div className="saved-connection-preview" aria-live="polite">
               <span>Tenants: {selectedPendingConnection.tenants.join(', ')}</span>
-              {selectedConnectionMissingScopes.length ? (
-                <strong>Missing scopes: {selectedConnectionMissingScopes.join(', ')}</strong>
-              ) : null}
             </div>
           ) : null}
           <Dialog
@@ -411,12 +400,6 @@ export function ConnectionManager({ compact = false }: { compact?: boolean }) {
             </DialogContent>
           </Dialog>
         </div>
-      ) : null}
-
-      {activeAuthConfig && activeConfigMissingScopes.length ? (
-        <p className="connection-help connection-help-warning">
-          Current connection is missing required scopes: {activeConfigMissingScopes.join(', ')}.
-        </p>
       ) : null}
 
       <div className="connection-actions">
