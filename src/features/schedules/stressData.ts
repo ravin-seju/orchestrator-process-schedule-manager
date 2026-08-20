@@ -162,6 +162,16 @@ const buildScheduleTiming = (bucket: StressBucket, index: number) => {
   }
 }
 
+// A few generated schedules get a StopProcessDate — one bucket already past (expired), one within
+// EXPIRING_SOON_DAYS (expiring-soon), one far out (ending) — so /testing?stress=50 shows a mix.
+const stopProcessDateForIndex = (index: number): string | null => {
+  const mod = index % 20
+  if (mod === 0) return new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
+  if (mod === 5) return new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+  if (mod === 10) return new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
+  return null
+}
+
 type MachineRobotEntry = Required<ProcessSchedule>['MachineRobots'][number]
 
 const stressMachinePool: MachineRobotEntry[] = [
@@ -232,11 +242,15 @@ const buildProcessSchedule = (
     index % 5 === 0 && index > 0
       ? [primaryMachine, stressMachinePool[(index + 1) % stressMachinePool.length]]
       : [primaryMachine]
+  const stopProcessDate = stopProcessDateForIndex(index)
+  // Mirror Orchestrator: it disables a trigger once its stop date passes, so the already-past
+  // bucket ships disabled. Without this no fixture reproduces the auto-disabled case at all.
+  const isExpiredBucket = stopProcessDate !== null && index % 20 === 0
 
   return {
     Id: 90000 + index,
     Name: `${baseName} ${displayNumber}`,
-    Enabled: true,
+    Enabled: !isExpiredBucket,
     ReleaseId: 70000 + index,
     ReleaseKey: `stress-release-${displayNumber}`,
     ReleaseName: `${processSlug}.Main.xaml`,
@@ -247,6 +261,8 @@ const buildProcessSchedule = (
     StartProcessNextOccurrence: timing.next,
     TimeZoneId: 'Central Standard Time',
     TimeZoneIana: 'America/Chicago',
+    StopProcessDate: stopProcessDate,
+    StopStrategy: stopProcessDate ? (index % 2 === 0 ? 'SoftStop' : 'Kill') : null,
     folderId: folder.Id,
     folderName: folder.FullyQualifiedName ?? folder.DisplayName ?? `Folder ${folder.Id}`,
     MachineRobots: machineRobots,

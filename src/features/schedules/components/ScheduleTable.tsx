@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { Hourglass } from 'lucide-react'
 import {
   classifyRecurrenceBucket,
   folderAccentStyle,
@@ -13,7 +14,16 @@ import {
 import { recurrenceBucketLabels } from '../constants'
 import { formatNumber } from '../formatters'
 import type { ProcessSchedule } from '../orchestrator'
-import { getScheduleSummary, isQueueTrigger, resolveMachineNames, resolveRobotNames } from '../scheduleUtils'
+import {
+  getLifecycleStatus,
+  getScheduleSummary,
+  isAutoDisabledByStopDate,
+  isLifecycleAttention,
+  isQueueTrigger,
+  lifecycleEndLabel,
+  resolveMachineNames,
+  resolveRobotNames,
+} from '../scheduleUtils'
 
 const inventoryRowHeight = 36
 const inventoryOverscan = 8
@@ -21,7 +31,9 @@ const inventoryColumnCount = 9
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 // Number + status + type (fixed-ish) plus the two fixed-percent Machine/Robot columns;
 // the remainder is shared by the text-weighted name/process/folder/pattern columns.
-const reservedColumnPercent = 39.5
+// Keep this in step with the fixed --inventory-*-width values below (2.4 + 9.5 + 10.5 + 11 + 9),
+// or the dynamic columns are handed more space than is left and the row overflows.
+const reservedColumnPercent = 42.4
 const textWidth = (value: string | null | undefined, min: number, max: number) =>
   clamp((value?.length ?? 0) * 7.6 + 34, min, max)
 
@@ -117,7 +129,8 @@ export function ScheduleTable({
         '--inventory-pattern-width': widthFor(patternWeight),
         '--inventory-process-width': widthFor(processWidth),
         '--inventory-robot-width': '9%',
-        '--inventory-status-width': '6.5%',
+        // Wide enough for "Auto-disabled"; .status truncates with an ellipsis, so 6.5% clipped it.
+        '--inventory-status-width': '9.5%',
         '--inventory-type-width': '10.5%',
       } as CSSProperties,
     }
@@ -192,6 +205,11 @@ export function ScheduleTable({
               const isQueue = isQueueTrigger(schedule)
               const patternLabel = isQueue ? '—' : getScheduleSummary(schedule)
               const patternTitle = isQueue ? 'Queue-driven trigger — no time-based pattern' : patternLabel
+              const lifecycleStatus = getLifecycleStatus(schedule)
+              const lifecycleStopDate =
+                isLifecycleAttention(lifecycleStatus) && schedule.StopProcessDate
+                  ? new Date(schedule.StopProcessDate)
+                  : null
 
               return (
                 <tr key={`${schedule.folderId}-${schedule.Id}`} style={folderAccentStyle(schedule.folderName)}>
@@ -229,16 +247,38 @@ export function ScheduleTable({
                       <TooltipContent>{triggerTypeLabel}</TooltipContent>
                     </Tooltip>
                   </td>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <td className="table-pattern">{patternLabel}</td>
-                    </TooltipTrigger>
-                    <TooltipContent>{patternTitle}</TooltipContent>
-                  </Tooltip>
-                  <td>
-                    <span className={schedule.Enabled ? 'status enabled' : 'status disabled'}>
-                      {schedule.Enabled ? 'Enabled' : 'Disabled'}
+                  <td className="table-pattern">
+                    <span className="table-pattern-cell">
+                      {lifecycleStopDate ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span
+                              className={`lifecycle-badge lifecycle-${lifecycleStatus}`}
+                              role="img"
+                              aria-label={lifecycleEndLabel(schedule, lifecycleStopDate)}
+                            >
+                              <Hourglass size={12} aria-hidden="true" />
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>{lifecycleEndLabel(schedule, lifecycleStopDate)}</TooltipContent>
+                        </Tooltip>
+                      ) : null}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="table-pattern-text">{patternLabel}</span>
+                        </TooltipTrigger>
+                        <TooltipContent>{patternTitle}</TooltipContent>
+                      </Tooltip>
                     </span>
+                  </td>
+                  <td>
+                    {isAutoDisabledByStopDate(schedule) ? (
+                      <span className="status auto-disabled">Auto-disabled</span>
+                    ) : (
+                      <span className={schedule.Enabled ? 'status enabled' : 'status disabled'}>
+                        {schedule.Enabled ? 'Enabled' : 'Disabled'}
+                      </span>
+                    )}
                   </td>
                 </tr>
               )

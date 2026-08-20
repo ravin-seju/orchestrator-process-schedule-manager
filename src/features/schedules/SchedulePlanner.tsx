@@ -8,7 +8,9 @@ import {
   CheckCircle2,
   Copy,
   Folder,
+  Hourglass,
   Server,
+  X,
   Zap,
 } from 'lucide-react'
 import {
@@ -17,7 +19,9 @@ import {
   deriveFolderScopeSelection,
   deriveMachineScopeSelection,
   formatRobotDisplayName,
+  isAutoDisabledByStopDate,
 } from './scheduleUtils'
+import { formatNumber } from './formatters'
 import {
   defaultMonthSpanLaneLimit,
   emptyFolders,
@@ -103,6 +107,8 @@ const summaryIconForMetric = (key: SummaryMetricKey) => {
       return <AlertTriangle size={iconSize} aria-hidden="true" />
     case 'collisions':
       return <Zap size={iconSize} aria-hidden="true" />
+    case 'expiring':
+      return <Hourglass size={iconSize} aria-hidden="true" />
     case 'triggers':
     default:
       return <CalendarClock size={iconSize} aria-hidden="true" />
@@ -152,6 +158,7 @@ function Dashboard({
   const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([])
   const [selectedMachineIds, setSelectedMachineIds] = useState<number[]>([])
   const [selectedRobotIds, setSelectedRobotIds] = useState<number[]>([])
+  const [autoDisabledNoticeDismissed, setAutoDisabledNoticeDismissed] = useState(false)
   const calendarGridRef = useRef<HTMLDivElement | null>(null)
 
   const handleFullRefresh = useCallback(() => {
@@ -211,6 +218,13 @@ function Dashboard({
     setSelectedDayDetail(null)
     setQuery(nextQuery)
   }, [])
+  // Counted from every loaded schedule, NOT filteredSchedules: Orchestrator disables a trigger when
+  // its stop date passes, so the default Enabled filter hides exactly the triggers this notice
+  // exists to surface. Every metric is deliberately filter-aware; this notice deliberately is not.
+  const autoDisabledCount = useMemo(
+    () => schedules.reduce((total, schedule) => total + (isAutoDisabledByStopDate(schedule) ? 1 : 0), 0),
+    [schedules],
+  )
   const handleSelectedFolderIdsChange = useCallback((nextSelectedFolderIds: string[]) => {
     setSelectedDayDetail(null)
     setSelectedFolderIds(nextSelectedFolderIds)
@@ -286,7 +300,9 @@ function Dashboard({
         ? 'stale'
         : attentionFilter === 'collisions'
           ? 'collisions'
-          : null
+          : attentionFilter === 'expiring'
+            ? 'expiring'
+            : null
   const robotOptions = useMemo(() => {
     // Narrow robot options to robots used by the current scope: when a machine is selected,
     // robots that ran on that machine; when folder(s) are selected, robots used in those
@@ -348,7 +364,9 @@ function Dashboard({
             ? attentionFilter === 'stale' ? 'none' : 'stale'
             : key === 'collisions'
               ? attentionFilter === 'collisions' ? 'none' : 'collisions'
-              : attentionFilter
+              : key === 'expiring'
+                ? attentionFilter === 'expiring' ? 'none' : 'expiring'
+                : attentionFilter
       setAttentionFilter(next)
 
       if (next === 'none') {
@@ -387,12 +405,26 @@ function Dashboard({
     },
     [schedules, effectiveScheduleMachineIds],
   )
+  // Reveal the auto-disabled triggers, clearing everything that could hide them. The Status column
+  // only exists in the inventory view, so switch there too.
+  const handleShowAutoDisabled = useCallback(() => {
+    setWorkspaceView('inventory')
+    handleStatusFilterChange('disabled')
+    handleQueryChange('')
+    setSelectedFolderIds([])
+    setAttentionFilter('expired')
+  }, [handleStatusFilterChange, handleQueryChange])
   const attentionChipLabel: Record<Exclude<AttentionFilter, 'none'>, string> = {
     collisions: 'Collisions only',
     duplicates: 'Duplicates only',
+    expired: 'Auto-disabled only',
+    expiring: 'Expiring only',
     stale: 'Stale only',
   }
-  const hasNotices = Boolean(tenantError || loadError)
+  // Self-clears once you are actually looking at them, so there is nothing to dismiss by then.
+  const showAutoDisabledNotice =
+    autoDisabledCount > 0 && !autoDisabledNoticeDismissed && attentionFilter !== 'expired'
+  const hasNotices = Boolean(tenantError || loadError || showAutoDisabledNotice)
   const headerFilterChips = [
     trimmedQuery
       ? {
@@ -511,6 +543,8 @@ function Dashboard({
           setSelectedFolderIds([])
           setSelectedDayDetail(null)
           setIsUpcomingExpanded(false)
+          // A dismissal is about one tenant's triggers — do not let it leak to the next.
+          setAutoDisabledNoticeDismissed(false)
         }}
         refresh={handleFullRefresh}
         resolvedTheme={resolvedTheme}
@@ -524,6 +558,27 @@ function Dashboard({
         <section className="notice-stack" aria-label="Sync notices">
           {tenantError ? <div className="notice warning">Tenant list fallback active: {tenantError}</div> : null}
           {loadError ? <div className="notice error">Error: {loadError}</div> : null}
+          {showAutoDisabledNotice ? (
+            <div className="notice notice-attention">
+              <Hourglass size={14} aria-hidden="true" />
+              <p>
+                {formatNumber(autoDisabledCount)}{' '}
+                {autoDisabledCount === 1 ? 'trigger' : 'triggers'} reached their end date and were
+                auto-disabled.
+              </p>
+              <button className="text-button" onClick={handleShowAutoDisabled} type="button">
+                Show them
+              </button>
+              <button
+                className="icon-button"
+                onClick={() => setAutoDisabledNoticeDismissed(true)}
+                type="button"
+                aria-label="Dismiss auto-disabled notice"
+              >
+                <X size={14} aria-hidden="true" />
+              </button>
+            </div>
+          ) : null}
         </section>
       ) : null}
 

@@ -75,6 +75,7 @@ describe('summary metric derivation', () => {
       Collisions: 2,
       Duplicates: 0,
       Enabled: 2,
+      Expiring: 0,
       Folders: 2,
       Stale: 0,
       Triggers: 4,
@@ -86,6 +87,7 @@ describe('summary metric derivation', () => {
       'Active Today': 2,
       Collisions: 2,
       Duplicates: 0,
+      Expiring: 0,
       Folders: 2,
       Stale: 0,
       Triggers: 2,
@@ -96,6 +98,7 @@ describe('summary metric derivation', () => {
     expect(metricValues([disabledDaily, disabledMinute], 'disabled')).toEqual({
       Collisions: 0,
       Duplicates: 0,
+      Expiring: 0,
       Folders: 2,
       Stale: 0,
       'Suppressed Today': 1_441,
@@ -167,6 +170,30 @@ describe('summary metric derivation', () => {
 
     const result = metricValues([expiredOneShot], 'enabled')
     expect(result.Stale).toBe(1)
+  })
+
+  it('counts a schedule as expiring when its stop date has passed or falls within 14 days', () => {
+    const expired = baseSchedule({
+      Id: 50,
+      Name: 'Past Stop Date',
+      StopProcessDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      folderId: 500,
+    })
+    const expiringSoon = baseSchedule({
+      Id: 51,
+      Name: 'Soon Stop Date',
+      StopProcessDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      folderId: 500,
+    })
+    const farOut = baseSchedule({
+      Id: 52,
+      Name: 'Far Stop Date',
+      StopProcessDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      folderId: 500,
+    })
+
+    const result = metricValues([expired, expiringSoon, farOut], 'enabled')
+    expect(result.Expiring).toBe(2)
   })
 })
 

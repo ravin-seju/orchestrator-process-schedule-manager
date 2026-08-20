@@ -7,7 +7,12 @@ export const emptySchedules: ProcessSchedule[] = []
 export const emptyTenants: TenantInfo[] = []
 export const iconSize = 17
 export const defaultMonthSpanLaneLimit = 3
-export const minMonthSpanLaneLimit = 3
+// 2, not 3: the ResizeObserver in SchedulePlanner measures how many lanes fit, and a floor of 3
+// forced three lanes into cells too short for them — pinning the "+N more" link (positioned at
+// 22 + limit * monthSpanLaneStepPx) below the cell's overflow:hidden edge at short viewports.
+// 2 keeps a useful minimum of detail; the `min()` clamp on .day-events keeps the link on screen
+// when even two lanes do not fit.
+export const minMonthSpanLaneLimit = 2
 export const maxMonthSpanLaneLimit = 6
 export const monthSpanLaneStepPx = 18
 export const monthSpanReservedHeightPx = 44
@@ -18,6 +23,7 @@ export const maxHighFrequencyDetailTimeChips = 5
 export const maxInlineDetailMachines = 4
 export const pickerSearchThreshold = 8
 export const maxUpcomingItemsPerGroup = 12
+export const EXPIRING_SOON_DAYS = 14
 export const legacyTimelineModeStorageKey = 'process-calendar.timeline-mode'
 export const viewModeStorageKey = 'process-schedule-manager.view-mode'
 export const defaultViewMode: ViewMode = 'spanBars'

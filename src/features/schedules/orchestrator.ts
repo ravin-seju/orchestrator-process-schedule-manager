@@ -24,6 +24,8 @@ export interface ProcessSchedule {
   TimeZoneId?: string | null
   TimeZoneIana?: string | null
   QueueDefinitionId?: number | null
+  StopProcessDate?: string | null
+  StopStrategy?: 'SoftStop' | 'Kill' | null
   MachineRobots?: Array<{
     MachineId: number | null
     MachineName: string | null
@@ -108,6 +110,8 @@ const selectedScheduleFields = [
   'TimeZoneId',
   'TimeZoneIana',
   'QueueDefinitionId',
+  'StopProcessDate',
+  'StopStrategy',
   'MachineRobots',
 ].join(',')
 

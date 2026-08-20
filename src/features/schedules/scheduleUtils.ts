@@ -1,4 +1,5 @@
 import type { ProcessSchedule } from './orchestrator'
+import { EXPIRING_SOON_DAYS } from './constants'
 
 export interface ScheduleOccurrence {
   id: string
@@ -48,6 +49,30 @@ const getTimeFormatter = (timeZone: string | null | undefined): Intl.DateTimeFor
   }
 }
 
+// Shared cache for the zone-aware date labels below, mirroring getTimeFormatter: constructing an
+// Intl.DateTimeFormat is expensive and these run per row/chip. An unknown zone falls back to the
+// viewer's rather than throwing.
+const dateFormatterCache = new Map<string, Intl.DateTimeFormat>()
+
+const getFormatter = (
+  options: Intl.DateTimeFormatOptions,
+  timeZone: string | null | undefined,
+): Intl.DateTimeFormat => {
+  const key = `${JSON.stringify(options)}|${timeZone ?? ''}`
+  const cached = dateFormatterCache.get(key)
+  if (cached) return cached
+
+  let formatter: Intl.DateTimeFormat
+  try {
+    formatter = new Intl.DateTimeFormat(undefined, timeZone ? { ...options, timeZone } : options)
+  } catch {
+    formatter = new Intl.DateTimeFormat(undefined, options)
+  }
+  dateFormatterCache.set(key, formatter)
+
+  return formatter
+}
+
 const toDateKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
     date.getDate(),
@@ -58,8 +83,28 @@ export const dateKey = toDateKey
 export const monthLabel = (date: Date) =>
   new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(date)
 
-export const shortDateLabel = (date: Date) =>
-  new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
+export const shortDateLabel = (date: Date, timeZone?: string | null) =>
+  getFormatter({ day: 'numeric', month: 'short' }, timeZone).format(date)
+
+// Zone-aware, and it names the zone: StopProcessDate is an absolute instant, so rendering it in the
+// viewer's zone under a "Time zone: <schedule zone>" line could show a different calendar day than
+// the one Orchestrator enforces.
+export const fullDateTimeLabel = (date: Date, timeZone?: string | null) =>
+  getFormatter(
+    {
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      month: 'long',
+      timeZoneName: 'short',
+      weekday: 'long',
+      year: 'numeric',
+    },
+    timeZone,
+  ).format(date)
+
+export const scheduleTimeZone = (schedule: ProcessSchedule) =>
+  schedule.TimeZoneIana ?? schedule.TimeZoneId
 
 export const timeLabel = (date: Date, timeZone?: string | null) =>
   getTimeFormatter(timeZone).format(date)
@@ -447,19 +492,33 @@ export const deriveFolderScopeSelection = (
   return { machineIds: [...machineIds], robotIds: [...robotIds] }
 }
 
+// StopProcessDate is the instant Orchestrator auto-disables the trigger, so it cannot run past it.
+// Clamping the generation window here (rather than filtering afterwards) makes every consumer
+// consistent at once — calendar, Upcoming, Active Today, Collisions and the stale predicate all
+// stop projecting runs a trigger can no longer perform.
+const effectiveOccurrenceEnd = (schedule: ProcessSchedule, end: Date): Date => {
+  if (!schedule.StopProcessDate) return end
+  const stopMs = new Date(schedule.StopProcessDate).getTime()
+  if (Number.isNaN(stopMs)) return end
+
+  return stopMs < end.getTime() ? new Date(stopMs) : end
+}
+
 export const getScheduleOccurrences = (
   schedule: ProcessSchedule,
   start: Date,
   end: Date,
 ): ScheduleOccurrence[] => {
   if (isQueueTrigger(schedule)) return []
+  const effectiveEnd = effectiveOccurrenceEnd(schedule, end)
+  if (effectiveEnd.getTime() < start.getTime()) return []
   const details = parseDetails(schedule)
   const nextOccurrence = schedule.StartProcessNextOccurrence
     ? new Date(schedule.StartProcessNextOccurrence)
     : null
 
   if (shouldUseNextOnly(details, schedule)) {
-    if (nextOccurrence && nextOccurrence >= start && nextOccurrence <= end) {
+    if (nextOccurrence && nextOccurrence >= start && nextOccurrence <= effectiveEnd) {
       return [
         {
           id: `${schedule.folderId}-${schedule.Id}-next`,
@@ -481,14 +540,14 @@ export const getScheduleOccurrences = (
   const cursor = new Date(start)
   cursor.setHours(0, 0, 0, 0)
 
-  while (cursor <= end) {
+  while (cursor <= effectiveEnd) {
     const matchesWeekday = !weekdays || weekdays.has(cursor.getDay())
     const matchesMonthDay = !monthDays || monthDays.has(cursor.getDate())
 
     if (matchesWeekday && matchesMonthDay) {
       for (const time of times) {
         const date = cloneAtScheduleTime(cursor, time)
-        if (date >= start && date <= end) {
+        if (date >= start && date <= effectiveEnd) {
           occurrences.push({
             id: `${schedule.folderId}-${schedule.Id}-${toDateKey(date)}-${time.hour}-${time.minute}`,
             schedule,
@@ -504,7 +563,7 @@ export const getScheduleOccurrences = (
     cursor.setDate(cursor.getDate() + 1)
   }
 
-  if (occurrences.length === 0 && nextOccurrence && nextOccurrence >= start && nextOccurrence <= end) {
+  if (occurrences.length === 0 && nextOccurrence && nextOccurrence >= start && nextOccurrence <= effectiveEnd) {
     occurrences.push({
       id: `${schedule.folderId}-${schedule.Id}-next`,
       schedule,
@@ -552,6 +611,10 @@ export const isStaleSchedule = (
 
   const start = new Date(nowMs)
   const horizonEnd = new Date(nowMs + STALE_HORIZON_MS)
+  // Past its stop date the trigger can never run again, so nothing counts as upcoming — including a
+  // StartProcessNextOccurrence Orchestrator has not cleared yet. This is what the metric's own
+  // description ("...or an expired one-shot schedule") promises.
+  if (effectiveOccurrenceEnd(schedule, horizonEnd).getTime() < start.getTime()) return true
   if (getCachedScheduleOccurrences(schedule, start, horizonEnd).length > 0) return false
 
   if (schedule.StartProcessNextOccurrence) {
@@ -560,4 +623,46 @@ export const isStaleSchedule = (
   }
 
   return true
+}
+
+export type LifecycleStatus = 'expired' | 'expiring-soon' | 'ending'
+
+// StopProcessDate is an absolute trigger-disable date independent of cron cadence — it applies to
+// queue triggers too, unlike the isQueueTrigger-gated cron logic elsewhere in this file.
+export const getLifecycleStatus = (
+  schedule: ProcessSchedule,
+  nowMs: number = Date.now(),
+): LifecycleStatus | null => {
+  if (!schedule.StopProcessDate) return null
+  const stopMs = new Date(schedule.StopProcessDate).getTime()
+  if (Number.isNaN(stopMs)) return null
+  if (stopMs < nowMs) return 'expired'
+  if (stopMs - nowMs <= EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000) return 'expiring-soon'
+  return 'ending'
+}
+
+// The Expiring metric, the 'expiring' attention filter, and every lifecycle marker in the UI all
+// gate on this, so "a marker is showing" always means exactly "counted by the Expiring metric".
+// 'ending' (a stop date beyond EXPIRING_SOON_DAYS) is deliberately excluded: it is informational,
+// surfaced only as the day-details panel's "Ends ... · strategy" text line.
+export const isLifecycleAttention = (status: LifecycleStatus | null) =>
+  status === 'expired' || status === 'expiring-soon'
+
+// Orchestrator disables a trigger when StopProcessDate passes, so Enabled=false plus a past stop
+// date is the strongest signal available that the platform stopped it. It is an inference, not a
+// fact: someone who disabled the trigger manually after its stop date passed reads the same way.
+export const isAutoDisabledByStopDate = (schedule: ProcessSchedule, nowMs: number = Date.now()) =>
+  !schedule.Enabled && getLifecycleStatus(schedule, nowMs) === 'expired'
+
+// Tense follows the date, not the Enabled flag: "Ends 15 Aug" is wrong on 20 Aug whether or not
+// Orchestrator has disabled the trigger yet. Also carries the schedule's own timezone, so callers
+// cannot accidentally render an absolute stop instant in the viewer's zone.
+export const lifecycleEndLabel = (
+  schedule: ProcessSchedule,
+  date: Date,
+  nowMs: number = Date.now(),
+) => {
+  const when = fullDateTimeLabel(date, scheduleTimeZone(schedule))
+
+  return getLifecycleStatus(schedule, nowMs) === 'expired' ? `Ended on ${when}` : `Ends ${when}`
 }

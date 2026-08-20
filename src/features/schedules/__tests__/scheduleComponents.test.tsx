@@ -1227,6 +1227,74 @@ describe('CalendarWorkbench component', () => {
       clientWidthSpy.mockRestore()
     }
   })
+
+  const spanBarsForStopDate = (stopProcessDate: string) => {
+    const scenario = buildMonthScenario()
+    const schedule = baseSchedule({ Id: 70, Name: 'Lifecycle Process', StopProcessDate: stopProcessDate })
+    const range = getVisibleMonthRange(scenario.viewDate)
+    const occurrences = getScheduleOccurrences(schedule, range.start, range.end)
+    const calendarItemsByDay = buildCalendarItemsByDay(groupOccurrencesByDay(occurrences))
+
+    return buildSpanBarLayout(scenario.calendarDays, calendarItemsByDay, 2).bars
+  }
+
+  it('shows a glowing lifecycle dot on span bars for an expired trigger', () => {
+    const { container } = renderCalendarWorkbench({
+      overrides: { spanBars: spanBarsForStopDate(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()) },
+    })
+
+    expect(container.querySelector('.lifecycle-dot.lifecycle-expired')).not.toBeNull()
+  })
+
+  // The marker-equals-Expiring-metric invariant: a stop date beyond EXPIRING_SOON_DAYS is
+  // informational ('ending') and must not render a marker on any calendar surface.
+  it('renders no lifecycle dot on span bars for a far-future stop date', () => {
+    const { container } = renderCalendarWorkbench({
+      overrides: { spanBars: spanBarsForStopDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()) },
+    })
+
+    expect(container.querySelector('.calendar-span-bar')).not.toBeNull()
+    expect(container.querySelector('.lifecycle-dot')).toBeNull()
+  })
+
+  const renderWeekForStopDate = (stopProcessDate: string) => {
+    const viewDate = new Date(2026, 4, 6)
+    const calendarDays = getWeekDays(viewDate)
+    const range = getVisibleWeekRange(viewDate)
+    const schedule = baseSchedule({ Id: 71, Name: 'Lifecycle Week Process', StopProcessDate: stopProcessDate })
+    const calendarItemsByDay = buildCalendarItemsByDay(
+      groupOccurrencesByDay(getScheduleOccurrences(schedule, range.start, range.end)),
+    )
+    const spanBarLayout = buildSpanBarLayout(calendarDays, calendarItemsByDay, 7)
+
+    return renderCalendarWorkbench({
+      calendarMode: 'week',
+      overrides: {
+        calendarDays,
+        calendarItemsByDay,
+        calendarTitle: 'May 3-9, 2026',
+        calendarWeekCount: 1,
+        navigationUnitLabel: 'week',
+        spanBars: spanBarLayout.bars,
+        todayKey: dateKey(viewDate),
+        viewDate,
+        visibleSpanLaneLimit: 7,
+      },
+    })
+  }
+
+  it('shows a glowing lifecycle dot on Outlook Week timed events for a trigger expiring within EXPIRING_SOON_DAYS', () => {
+    const { container } = renderWeekForStopDate(new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString())
+
+    expect(container.querySelector('.lifecycle-dot.lifecycle-expiring-soon')).not.toBeNull()
+  })
+
+  it('renders no lifecycle dot on Outlook Week timed events for a far-future stop date', () => {
+    const { container } = renderWeekForStopDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())
+
+    expect(container.querySelector('.outlook-week-event')).not.toBeNull()
+    expect(container.querySelector('.lifecycle-dot')).toBeNull()
+  })
 })
 
 describe('UpcomingPanel component', () => {
@@ -1453,6 +1521,65 @@ describe('UpcomingPanel component', () => {
     expect(screen.queryByText(/^Robot:/)).not.toBeInTheDocument()
     expect(screen.queryByText(/^Machine:/)).not.toBeInTheDocument()
   })
+
+  const renderDayDetailForStopDate = (stopProcessDate: string) => {
+    const schedule = baseSchedule({
+      Id: 72,
+      Name: 'Hourly Process',
+      ReleaseName: 'Download.File',
+      StartProcessCron: '0 0 * 1/1 * ?',
+      StartProcessCronDetails: JSON.stringify({ type: 1, hourly: { atHour: 0, atMinute: 0 } }),
+      StartProcessCronSummary: 'Every hour',
+      StopProcessDate: stopProcessDate,
+    })
+    const date = new Date(2026, 4, 6)
+    const { start, end } = dayRange(date)
+    const occurrences = getScheduleOccurrences(schedule, start, end)
+    const group = buildProcessDayGroups(occurrences)[0]
+
+    return render(
+      <UpcomingPanel
+        activeSelectedDayDetail={{ key: dateKey(date), date, scheduleKey: group.scheduleKey, scope: 'schedule' }}
+        disabledCount={0}
+        enabledCount={1}
+        isExpanded
+        onCloseDayDetails={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onOpenDay={vi.fn()}
+        onOpenDayDetail={vi.fn()}
+        selectedDayOccurrences={occurrences}
+        upcomingDisplayGroups={[]}
+      />,
+    )
+  }
+
+  it('shows the full glowing lifecycle badge in the group heading for an expired trigger', () => {
+    const { container } = renderDayDetailForStopDate(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+
+    const badge = container.querySelector('.lifecycle-badge.lifecycle-expired')
+    expect(badge).not.toBeNull()
+    // role="img" is what makes the aria-label reliably exposed; a bare span is role=generic,
+    // where ARIA prohibits aria-label and user agents need not expose it.
+    expect(badge).toHaveAttribute('role', 'img')
+    // Past stop date → past tense. The far-future case below still reads "Ends", which is what
+    // proves the tense keys off the date rather than being hardcoded.
+    expect(screen.getByRole('img', { name: /^Ended on / })).toBeInTheDocument()
+    expect(screen.getByText(/^Ended on /)).toBeInTheDocument()
+  })
+
+  it('renders no lifecycle badge for a far-future stop date but keeps the Ends text line', () => {
+    const { container } = renderDayDetailForStopDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())
+
+    expect(container.querySelector('.lifecycle-badge')).toBeNull()
+    expect(screen.getByText(/^Ends /)).toBeInTheDocument()
+  })
+
+  it('omits the stop strategy when Orchestrator did not report one', () => {
+    const { container } = renderDayDetailForStopDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())
+
+    // StopStrategy is unset on this fixture, so no strategy must be asserted in the UI.
+    expect(container.querySelector('.day-detail-meta')?.textContent).not.toMatch(/Soft Stop|Kill/)
+  })
 })
 
 describe('ScheduleTable component', () => {
@@ -1590,8 +1717,93 @@ describe('ScheduleTable component', () => {
     expect(table.style.getPropertyValue('--inventory-folder-width')).toMatch(/%$/)
     expect(table.style.getPropertyValue('--inventory-pattern-width')).toMatch(/%$/)
     expect(table.style.getPropertyValue('--inventory-process-width')).toMatch(/%$/)
-    expect(table.style.getPropertyValue('--inventory-status-width')).toBe('6.5%')
+    // Wide enough for the "Auto-disabled" status chip, which would otherwise ellipsize.
+    expect(table.style.getPropertyValue('--inventory-status-width')).toBe('9.5%')
     expect(table.style.getPropertyValue('--inventory-type-width')).toBe('10.5%')
     expect(table.style.getPropertyValue('--inventory-table-min-width')).toBe('')
+  })
+
+  // reservedColumnPercent is a hand-maintained sum of the fixed column widths. If it drifts, the
+  // text-weighted columns are handed more space than is left and the row overflows horizontally.
+  it('keeps the fixed and dynamic column widths summing to 100%', () => {
+    render(<ScheduleTable schedules={[baseSchedule({ Id: 81, Name: 'Width Probe' })]} />)
+
+    const table = screen.getByRole('table')
+    const percent = (name: string) =>
+      Number.parseFloat(table.style.getPropertyValue(`--inventory-${name}-width`))
+    const fixed = 2.4 + percent('status') + percent('type') + percent('machine') + percent('robot')
+    const dynamic = ['name', 'process', 'folder', 'pattern'].reduce((sum, k) => sum + percent(k), 0)
+
+    expect(fixed + dynamic).toBeCloseTo(100, 1)
+  })
+
+  it('shows a glowing lifecycle icon in the Pattern column with an accessible label and tooltip', async () => {
+    const stopDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+    const schedules = [
+      baseSchedule({
+        Id: 51,
+        Name: 'Expiring Soon Process',
+        StopProcessDate: stopDate.toISOString(),
+        StopStrategy: 'SoftStop',
+      }),
+      baseSchedule({ Id: 52, Name: 'No Stop Date Process' }),
+    ]
+
+    const { container } = render(<ScheduleTable schedules={schedules} />)
+
+    // Only the schedule with a StopProcessDate gets a badge; the other row has none.
+    const badges = container.querySelectorAll('.lifecycle-badge')
+    expect(badges).toHaveLength(1)
+    const badge = badges[0] as HTMLElement
+    expect(badge).toHaveClass('lifecycle-expiring-soon')
+    // Assert the ACCESSIBLE name, not just the attribute: role="img" is what makes aria-label
+    // exposed at all (a bare span is role=generic, where ARIA prohibits aria-label).
+    expect(screen.getByRole('img', { name: /^Ends / })).toBe(badge)
+
+    // Full date-time also lives in the tooltip (Radix portal) — revealed on focus.
+    fireEvent.focus(badge)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/^Ends /)
+  })
+
+  it('distinguishes an auto-disabled trigger from one someone switched off', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 71,
+        Name: 'Stopped On End Date',
+        Enabled: false,
+        StopProcessDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      baseSchedule({ Id: 72, Name: 'Switched Off By Hand', Enabled: false }),
+      baseSchedule({ Id: 73, Name: 'Running Fine' }),
+    ]
+
+    const { container } = render(<ScheduleTable schedules={schedules} />)
+
+    const statuses = Array.from(container.querySelectorAll('.status')).map((s) => s.textContent)
+    expect(statuses).toEqual(['Auto-disabled', 'Disabled', 'Enabled'])
+    // The row still carries its lifecycle marker — the two signals are independent.
+    expect(container.querySelectorAll('.lifecycle-badge')).toHaveLength(1)
+  })
+
+  it('marks only the triggers the Expiring metric counts, not far-future stop dates', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 61,
+        Name: 'Expiring Soon Process',
+        StopProcessDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      baseSchedule({
+        Id: 62,
+        Name: 'Ends Far Future Process',
+        StopProcessDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    ]
+
+    const { container } = render(<ScheduleTable schedules={schedules} />)
+
+    // A stop date beyond EXPIRING_SOON_DAYS is informational, not an attention marker — so the
+    // badge's presence stays exactly equal to the Expiring metric's definition.
+    expect(container.querySelectorAll('.lifecycle-badge')).toHaveLength(1)
+    expect(container.querySelector('.lifecycle-badge')).toHaveClass('lifecycle-expiring-soon')
   })
 })

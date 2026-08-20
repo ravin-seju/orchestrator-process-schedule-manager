@@ -2,7 +2,7 @@ import { useDeferredValue, useMemo } from 'react'
 import { buildScheduleSearchIndex, classifyRecurrenceBucket } from '../calendarDisplay'
 import type { ProcessSchedule } from '../orchestrator'
 import { measurePerformance } from '../performance'
-import { getAssignedMachineIds, getAssignedRobotIds, getCachedScheduleOccurrences, isQueueTrigger, isStaleSchedule } from '../scheduleUtils'
+import { getAssignedMachineIds, getAssignedRobotIds, getCachedScheduleOccurrences, getLifecycleStatus, isAutoDisabledByStopDate, isLifecycleAttention, isQueueTrigger, isStaleSchedule } from '../scheduleUtils'
 import type { AttentionFilter, StatusFilter, TriggerTypeFilter } from '../types'
 
 const COLLISION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
@@ -113,6 +113,16 @@ export const applyAttentionFilter = (
     const end = new Date(start.getTime() + COLLISION_WINDOW_MS)
     const colliding = findCollisionSet(matches, start, end, machineScope, robotScope, scheduleMachineIds)
     return matches.filter((s) => colliding.has(s))
+  }
+
+  if (attentionFilter === 'expiring') {
+    const now = Date.now()
+    return matches.filter((s) => isLifecycleAttention(getLifecycleStatus(s, now)))
+  }
+
+  if (attentionFilter === 'expired') {
+    const now = Date.now()
+    return matches.filter((s) => isAutoDisabledByStopDate(s, now))
   }
 
   return matches

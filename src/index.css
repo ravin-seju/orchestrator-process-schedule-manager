@@ -99,6 +99,7 @@
   --metric-machines: #5b53c6;
   --metric-robots: #c2476e;
   --metric-suppressed: var(--orange);
+  --metric-expiring: var(--warning);
   --env-alpha-accent: #7c3aed;
   --dense-cluster-bg: #fff0e9;
   --dense-cluster-border: color-mix(in srgb, var(--orange) 58%, var(--border));
@@ -189,6 +190,7 @@
   --metric-machines: #8b82ff;
   --metric-robots: #ff7aa8;
   --metric-suppressed: var(--orange);
+  --metric-expiring: var(--warning);
   --env-alpha-accent: #a78bfa;
   --font-xxs: 10px;
   --font-xs: 11px;
@@ -2062,6 +2064,42 @@ h3 {
   color: var(--warning);
 }
 
+/* Actionable notice: same amber as the lifecycle marker and the Expiring metric, with the message
+   taking the free space so the buttons sit hard right. Deliberately slimmer than .notice.error /
+   .notice.warning — it lives in the app-shell's `notices` grid row, so every pixel here is taken
+   off each calendar week row. The buttons must shrink too: .text-button's own min-height of 34px
+   is what set the floor, since the tallest child wins in a flex row. */
+.notice.notice-attention {
+  background: var(--warning-soft);
+  border-color: color-mix(in srgb, var(--warning) 26%, transparent);
+  border-radius: 10px;
+  color: var(--warning);
+  font-size: var(--font-sm);
+  gap: 6px;
+  min-height: 22px;
+  padding: 2px 10px;
+}
+
+.notice.notice-attention p {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.notice.notice-attention .text-button {
+  color: var(--warning);
+  flex: 0 0 auto;
+  min-height: 20px;
+  padding: 0 8px;
+}
+
+/* aspect-ratio: 1 on .icon-button means width also sets the height. */
+.notice.notice-attention .icon-button {
+  color: var(--warning);
+  flex: 0 0 auto;
+  min-height: 20px;
+  width: 20px;
+}
+
 .control-band {
   align-items: center;
   background: transparent;
@@ -2897,11 +2935,23 @@ html[data-theme-mode='system'] .calendar-panel .weekday {
   z-index: 16;
 }
 
+/* --span-more-top places the "+N more" link directly under the last span-bar lane. Clamp it to the
+   cell so a computed offset taller than the cell can never push the link past the parent's
+   overflow:hidden edge — this box is z-index 16 against the bars' 8, so it stays visible either way. */
 .calendar-grid.month.view-spanBars .day-events {
   align-items: center;
   bottom: auto;
   height: 13px;
-  top: var(--span-more-top, 58px);
+  top: min(var(--span-more-top, 58px), calc(100% - 13px));
+}
+
+/* When the cell is too short for the minimum lane count, the clamped link lands on top of a span
+   bar. An opaque chip keeps it readable instead of sitting on a coloured bar. Month cells all use
+   --calendar-cell (muted ones included), so this matches the backdrop everywhere but on hover. */
+.calendar-grid.month.view-spanBars .more-count {
+  background: var(--calendar-cell);
+  border-radius: 4px;
+  padding: 0 4px;
 }
 
 .calendar-grid.view-spanBars .more-count {
@@ -3563,6 +3613,14 @@ button.year-day {
   min-width: 24px;
 }
 
+/* Inside a calendar cell .process-row-meta is hidden, so the title is the only flex item besides a
+   leading .lifecycle-dot. With flex-shrink:0 its max-width:100% box stays full-container width
+   while the dot shifts it 12px right, pushing the box (and the ellipsis at its end) past
+   .process-row's overflow:hidden edge. Letting it shrink keeps the ellipsis inside the chip. */
+.calendar-day .process-row-title {
+  flex-shrink: 1;
+}
+
 .process-row-meta {
   color: var(--text-muted);
   flex: 1 1 auto;
@@ -3998,17 +4056,13 @@ button.year-day {
 
 .day-detail-group-heading {
   align-items: center;
-  display: grid;
+  display: flex;
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr);
 }
 
-.day-detail-group-heading > span {
-  align-self: stretch;
-  background: var(--folder-accent);
-  border-radius: 999px;
-  min-height: 28px;
-  width: 4px;
+.day-detail-group-heading > div {
+  flex: 1 1 0%;
+  min-width: 0;
 }
 
 .day-detail-group-heading h3 {
@@ -4223,6 +4277,49 @@ button.year-day {
   font-weight: 400;
 }
 
+/* One amber treatment for every lifecycle marker on every surface — the badge (inventory table +
+   details panel) and the dot (calendar chips) share --warning, the same token behind
+   --metric-expiring, so the "Expiring" header metric and the markers it counts always agree.
+   Only expired / expiring-soon ever render (see isLifecycleAttention), so every marker glows. */
+.lifecycle-badge,
+.lifecycle-dot {
+  animation: lifecycle-glow 1.6s ease-in-out infinite;
+  background: var(--warning);
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.lifecycle-badge {
+  align-items: center;
+  color: var(--surface);
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  width: 20px;
+}
+
+.lifecycle-dot {
+  display: inline-block;
+  height: 8px;
+  width: 8px;
+}
+
+@keyframes lifecycle-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--warning) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 6px 2px color-mix(in srgb, var(--warning) 45%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lifecycle-badge,
+  .lifecycle-dot {
+    animation: none;
+  }
+}
+
 .table-process {
   color: var(--text);
 }
@@ -4248,6 +4345,10 @@ button.year-day {
   font-weight: 500;
 }
 
+/* NEVER give this td `display: flex` — a td whose display is not table-cell gets wrapped in an
+   anonymous table-cell, so it sizes to its own content instead of the 36px row and its
+   border-bottom (the row separator, `.inventory-table td`) then draws well above every sibling
+   cell's. Put badge/text layout on .table-pattern-cell instead. */
 .table-pattern {
   color: var(--text-muted);
   line-height: 1.35;
@@ -4255,6 +4356,21 @@ button.year-day {
   overflow-wrap: anywhere;
   text-overflow: clip;
   white-space: normal;
+}
+
+.table-pattern-cell {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+/* Flex items have a min-content floor, so without min-width:0 the nowrap pattern text refuses to
+   shrink and pushes the badge out of the (overflow:hidden) cell. nowrap itself is inherited from
+   `.inventory-table td`; the full text stays available via this span's own Tooltip. */
+.table-pattern-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .schedule-type-chip {
@@ -4294,6 +4410,13 @@ button.year-day {
 .status.disabled {
   background: var(--disabled-soft);
   color: var(--disabled);
+}
+
+/* Amber, matching the lifecycle marker: this trigger is off because its stop date passed, which is
+   a different fact from someone having switched it off. */
+.status.auto-disabled {
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 
 .spin {

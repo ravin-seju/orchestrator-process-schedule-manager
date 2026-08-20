@@ -7,7 +7,7 @@ import {
 } from '../calendarDisplay'
 import { formatNumber, formatRunCount } from '../formatters'
 import { weekdayLabels } from '../constants'
-import { timeLabel } from '../scheduleUtils'
+import { getLifecycleStatus, isLifecycleAttention, lifecycleEndLabel, timeLabel } from '../scheduleUtils'
 import type { CalendarDisplayItem, OutlookWeekTimedEvent, ProcessDayGroup, RuntimeStats, SelectedDayDetail } from '../types'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
@@ -396,12 +396,20 @@ const DenseSummaryChip = memo(function DenseSummaryChip({
   onOpenDayDetail: (item: ProcessDayGroup) => void
 }) {
   const title = `${span.item.schedule.Name} - ${span.item.bucketLabel} - ${formatRunCount(span.item.runCount)}/day - ${formatRunCount(span.totalRuns)} total`
+  const lifecycleStatus = getLifecycleStatus(span.item.schedule)
+  const lifecycleStopDate =
+    isLifecycleAttention(lifecycleStatus) && span.item.schedule.StopProcessDate
+      ? new Date(span.item.schedule.StopProcessDate)
+      : null
+  const lifecycleSuffix = lifecycleStopDate
+    ? ` · ${lifecycleEndLabel(span.item.schedule, lifecycleStopDate)}`
+    : ''
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
-          aria-label={`Show exact runs for ${title}`}
+          aria-label={`Show exact runs for ${title}${lifecycleSuffix}`}
           className={`outlook-all-day-chip ${span.item.schedule.Enabled ? '' : 'is-disabled'}`}
           onClick={() => onOpenDayDetail(span.item)}
           style={
@@ -415,12 +423,15 @@ const DenseSummaryChip = memo(function DenseSummaryChip({
           type="button"
         >
           <span className="outlook-event-copy">
+            {lifecycleStopDate ? (
+              <span className={`lifecycle-dot lifecycle-${lifecycleStatus}`} aria-hidden="true" />
+            ) : null}
             <span className="outlook-event-title">{span.item.schedule.Name}</span>
             <span className="outlook-event-meta">{span.item.bucketLabel}</span>
           </span>
         </button>
       </TooltipTrigger>
-      <TooltipContent>{`Show exact runs for ${title}`}</TooltipContent>
+      <TooltipContent>{`Show exact runs for ${title}${lifecycleSuffix}`}</TooltipContent>
     </Tooltip>
   )
 })
@@ -662,6 +673,14 @@ export const OutlookWeekView = memo(function OutlookWeekView({
                       const stats = runtimeStats?.get(event.item.schedule.Id)
                       const typMinutes = stats ? Math.max(1, Math.ceil(stats.medianSec / 60)) : null
                       const p90Minutes = stats ? Math.max(1, Math.ceil(stats.p90Sec / 60)) : null
+                      const lifecycleStatus = getLifecycleStatus(event.item.schedule)
+                      const lifecycleStopDate =
+                        isLifecycleAttention(lifecycleStatus) && event.item.schedule.StopProcessDate
+                          ? new Date(event.item.schedule.StopProcessDate)
+                          : null
+                      const lifecycleSuffix = lifecycleStopDate
+                        ? ` · ${lifecycleEndLabel(event.item.schedule, lifecycleStopDate)}`
+                        : ''
 
                       return (
                         <Tooltip key={event.id}>
@@ -686,10 +705,13 @@ export const OutlookWeekView = memo(function OutlookWeekView({
                                   '--event-height': `${eventHeight}px`,
                                 } as CSSProperties
                               }
-                              aria-label={`Show exact runs for ${title}`}
+                              aria-label={`Show exact runs for ${title}${lifecycleSuffix}`}
                               type="button"
                             >
                               <span className="outlook-event-copy">
+                                {lifecycleStopDate ? (
+                                  <span className={`lifecycle-dot lifecycle-${lifecycleStatus}`} aria-hidden="true" />
+                                ) : null}
                                 <span className="outlook-event-title">{event.item.schedule.Name}</span>
                                 {typMinutes !== null && (
                                   <span className="outlook-event-meta">Typical {typMinutes}m</span>
@@ -708,6 +730,9 @@ export const OutlookWeekView = memo(function OutlookWeekView({
                             ) : (
                               <p>No recent run history</p>
                             )}
+                            {lifecycleStopDate ? (
+                              <p>{lifecycleEndLabel(event.item.schedule, lifecycleStopDate)}</p>
+                            ) : null}
                           </TooltipContent>
                         </Tooltip>
                       )

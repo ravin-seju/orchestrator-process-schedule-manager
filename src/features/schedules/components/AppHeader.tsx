@@ -28,12 +28,14 @@ const ACTIONABLE_METRIC_KEYS: ReadonlySet<SummaryMetricKey> = new Set([
   'duplicateSchedules',
   'stale',
   'collisions',
+  'expiring',
 ])
 
 const chipNoun = (key: SummaryMetricKey, value: number): string => {
   if (key === 'duplicateSchedules') return value === 1 ? 'duplicate' : 'duplicates'
   if (key === 'stale') return value === 1 ? 'stale trigger' : 'stale triggers'
   if (key === 'collisions') return value === 1 ? 'collision' : 'collisions'
+  if (key === 'expiring') return value === 1 ? 'expiring trigger' : 'expiring triggers'
   return ''
 }
 

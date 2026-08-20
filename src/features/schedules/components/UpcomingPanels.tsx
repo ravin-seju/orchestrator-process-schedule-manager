@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { Hourglass, X } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
@@ -12,7 +12,15 @@ import {
 } from '../calendarDisplay'
 import { maxDetailTimeChips, maxHighFrequencyDetailTimeChips, maxInlineDetailMachines, recurrenceBucketLabels } from '../constants'
 import { formatNumber } from '../formatters'
-import { resolveMachineNames, resolveRobotNames, shortDateLabel, timeLabel } from '../scheduleUtils'
+import {
+  getLifecycleStatus,
+  isLifecycleAttention,
+  lifecycleEndLabel,
+  resolveMachineNames,
+  resolveRobotNames,
+  shortDateLabel,
+  timeLabel,
+} from '../scheduleUtils'
 import type { ScheduleOccurrence } from '../scheduleUtils'
 import type { ProcessDayGroup, RuntimeStats, SelectedDayDetail, UpcomingDisplayItem } from '../types'
 
@@ -145,6 +153,19 @@ export function DayDetailsPanel({
             const groupMachines = showRunInfo
               ? resolveMachineNames(group.schedule.Id, scheduleMachineIds, machineNames)
               : []
+            const lifecycleStatus = getLifecycleStatus(group.schedule)
+            const lifecycleStopDate =
+              isLifecycleAttention(lifecycleStatus) && group.schedule.StopProcessDate
+                ? new Date(group.schedule.StopProcessDate)
+                : null
+            // Only label a strategy Orchestrator actually reported. StopStrategy is optional, so a
+            // two-way `=== 'Kill'` test would render an unset strategy as a configured "Soft Stop".
+            const stopStrategyLabel =
+              group.schedule.StopStrategy === 'Kill'
+                ? 'Kill'
+                : group.schedule.StopStrategy === 'SoftStop'
+                  ? 'Soft Stop'
+                  : null
 
             return (
               <section
@@ -153,14 +174,35 @@ export function DayDetailsPanel({
                 style={folderColorVars(group.schedule.folderName)}
               >
                 <div className="day-detail-group-heading">
+                  {lifecycleStopDate ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={`lifecycle-badge lifecycle-${lifecycleStatus}`}
+                          role="img"
+                          aria-label={lifecycleEndLabel(group.schedule, lifecycleStopDate)}
+                        >
+                          <Hourglass size={12} aria-hidden="true" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{lifecycleEndLabel(group.schedule, lifecycleStopDate)}</TooltipContent>
+                    </Tooltip>
+                  ) : null}
                   <div>
                     <h3>{group.schedule.Name}</h3>
                     <p>{recurrenceBucketLabels[bucket]} · {group.schedule.folderName}</p>
                   </div>
                 </div>
-                {timeZone || showRunInfo ? (
+                {timeZone || showRunInfo || group.schedule.StopProcessDate ? (
                   <div className="day-detail-meta">
                     {timeZone ? <p>Time zone: {timeZone}</p> : null}
+                    {group.schedule.StopProcessDate ? (
+                      <p>
+                        {lifecycleStatus === 'expired' ? 'Ended on ' : 'Ends '}
+                        {shortDateLabel(new Date(group.schedule.StopProcessDate), timeZone)}
+                        {stopStrategyLabel ? ` · ${stopStrategyLabel}` : ''}
+                      </p>
+                    ) : null}
                     {showRunInfo ? (
                       stats ? (
                         <>
