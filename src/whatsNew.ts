@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Activity, Bot, LogIn, Palette, ShieldCheck, Wrench } from 'lucide-react'
+import { Activity, BellRing, Bot, CalendarClock, Hourglass, LogIn, Palette, ShieldCheck, Wrench } from 'lucide-react'
 
 // A single "What's New" bullet: an icon plus a short, plain-language description.
 export type WhatsNewItem = {
@@ -23,6 +23,45 @@ export type WhatsNewRelease = {
 // Single source of truth, newest-first. Prepend a new entry each release; its `version`
 // becomes the app version (see APP_VERSION) — the header badge and this modal both read it.
 export const CHANGELOG: WhatsNewRelease[] = [
+  {
+    version: '1.5',
+    sections: [
+      {
+        heading: "What's new",
+        items: [
+          {
+            icon: Hourglass,
+            title: 'Trigger lifecycle awareness',
+            description:
+              'Triggers with an end date in the past or the next two weeks are flagged with an amber hourglass across the calendar and inventory, and a new Expiring metric counts exactly that set.',
+          },
+          {
+            icon: BellRing,
+            title: 'Auto-disabled triggers surfaced',
+            description:
+              'Orchestrator switches a trigger off once its end date passes, which hides it behind the default Enabled filter. A banner now reports how many and jumps straight to them, and their status reads "Auto-disabled" rather than a plain "Disabled".',
+          },
+          {
+            icon: CalendarClock,
+            title: 'No runs shown past an end date',
+            description:
+              'The calendar, upcoming panel, and the Active Today and Collisions metrics all stop projecting runs a trigger can no longer perform. End dates also render in the trigger’s own timezone.',
+          },
+        ],
+      },
+      {
+        heading: 'Fixes & polish',
+        items: [
+          {
+            icon: Wrench,
+            title: 'Cleaner inventory and calendar rendering',
+            description:
+              'Inventory row separators line up again, and the month view’s "+N more" link is no longer clipped at shorter window heights.',
+          },
+        ],
+      },
+    ],
+  },
   {
     version: '1.1',
     sections: [

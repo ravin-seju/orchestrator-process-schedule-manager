@@ -15,8 +15,9 @@ describe('WhatsNewDialog', () => {
     render(<WhatsNewDialog />)
     expect(screen.getByRole('heading', { name: "What's New" })).toBeInTheDocument()
     expect(screen.getByText(`Version ${LATEST_RELEASE.version}`)).toBeInTheDocument()
-    // A seeded item from the changelog renders.
-    expect(screen.getByText('Machine & robot awareness')).toBeInTheDocument()
+    // An item from the changelog renders. Read from LATEST_RELEASE rather than hardcoded, so
+    // prepending a release does not break this — the badge and modal already derive from it.
+    expect(screen.getByText(LATEST_RELEASE.sections[0].items[0].title)).toBeInTheDocument()
   })
 
   it('marks the version seen and closes when the close button is clicked', () => {
