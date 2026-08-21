@@ -4325,7 +4325,14 @@ button.year-day {
   width: auto;
 }
 
-.table-number {
+/* Scoped, like .table-ends above: `.inventory-table th, .inventory-table td` sets
+   color: var(--text) at (0,1,1), which beats a bare .table-number at (0,1,0) whatever the source
+   order — this column rendered --text, not --text-muted, since the first commit.
+   Note the neighbouring cell selectors that declare var(--text) (.table-name, .table-process,
+   .table-machine, .table-robot) are overridden in exactly the same way; they only *look* correct
+   because they happen to declare the value that wins. Do not trust them — scope them too before
+   changing any of their colours. */
+.inventory-table .table-number {
   color: var(--text-muted);
   font-size: var(--font-xs);
   font-weight: 500;
@@ -4419,8 +4426,9 @@ button.year-day {
 /* NEVER give this td `display: flex` — a td whose display is not table-cell gets wrapped in an
    anonymous table-cell, so it sizes to its own content instead of the 36px row and its
    border-bottom (the row separator, `.inventory-table td`) then draws well above every sibling
-   cell's. Put badge/text layout on .table-pattern-cell instead. */
-.table-pattern {
+   cell's. Put badge/text layout on .table-pattern-cell instead.
+   Scoped for the same specificity reason as .table-number above. */
+.inventory-table .table-pattern {
   color: var(--text-muted);
   line-height: 1.35;
   overflow: visible;
