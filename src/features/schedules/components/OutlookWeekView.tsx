@@ -7,7 +7,7 @@ import {
 } from '../calendarDisplay'
 import { formatNumber, formatRunCount } from '../formatters'
 import { weekdayLabels } from '../constants'
-import { getLifecycleStatus, isLifecycleAttention, lifecycleEndLabel, scheduleStopDate, timeLabel } from '../scheduleUtils'
+import { getLifecycleStatus, lifecycleEndLabel, lifecycleMarkerTone, scheduleStopDate, timeLabel } from '../scheduleUtils'
 import type { CalendarDisplayItem, OutlookWeekTimedEvent, ProcessDayGroup, RuntimeStats, SelectedDayDetail } from '../types'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
@@ -400,7 +400,8 @@ const DenseSummaryChip = memo(function DenseSummaryChip({
   const title = `${span.item.schedule.Name} - ${span.item.bucketLabel} - ${formatRunCount(span.item.runCount)}/day - ${formatRunCount(span.totalRuns)} total`
   const lifecycleStatus = getLifecycleStatus(span.item.schedule, undefined, horizonDays)
   const lifecycleStopDate = scheduleStopDate(span.item.schedule)
-  const isSoon = isLifecycleAttention(lifecycleStatus)
+  const markerTone = lifecycleMarkerTone(span.item.schedule, undefined, horizonDays)
+  const isSoon = markerTone === 'amber'
   const lifecycleSuffix = lifecycleStopDate
     ? ` · ${lifecycleEndLabel(span.item.schedule, lifecycleStopDate)}`
     : ''
@@ -423,7 +424,7 @@ const DenseSummaryChip = memo(function DenseSummaryChip({
           type="button"
         >
           <span className="outlook-event-copy">
-            {lifecycleStopDate ? (
+            {markerTone ? (
               <span
                 className={`lifecycle-dot lifecycle-${lifecycleStatus}${isSoon ? '' : ' is-later'}`}
                 aria-hidden="true"
@@ -681,7 +682,8 @@ export const OutlookWeekView = memo(function OutlookWeekView({
                       const p90Minutes = stats ? Math.max(1, Math.ceil(stats.p90Sec / 60)) : null
                       const lifecycleStatus = getLifecycleStatus(event.item.schedule, undefined, horizonDays)
                       const lifecycleStopDate = scheduleStopDate(event.item.schedule)
-                      const lifecycleIsSoon = isLifecycleAttention(lifecycleStatus)
+                      const lifecycleTone = lifecycleMarkerTone(event.item.schedule, undefined, horizonDays)
+                      const lifecycleIsSoon = lifecycleTone === 'amber'
                       const lifecycleSuffix = lifecycleStopDate
                         ? ` · ${lifecycleEndLabel(event.item.schedule, lifecycleStopDate)}`
                         : ''
@@ -713,7 +715,7 @@ export const OutlookWeekView = memo(function OutlookWeekView({
                               type="button"
                             >
                               <span className="outlook-event-copy">
-                                {lifecycleStopDate ? (
+                                {lifecycleTone ? (
                                   <span
                                     className={`lifecycle-dot lifecycle-${lifecycleStatus}${lifecycleIsSoon ? '' : ' is-later'}`}
                                     aria-hidden="true"

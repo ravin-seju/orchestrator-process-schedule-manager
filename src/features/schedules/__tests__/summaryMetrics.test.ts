@@ -219,6 +219,17 @@ describe('summary metric derivation', () => {
     expect(metricValues(schedules, 'enabled', 365).Expiring).toBe(1)
   })
 
+  it('excludes disabled triggers from the Expiring count', () => {
+    // The metric counts what draws an amber marker, and a disabled trigger draws none — otherwise
+    // the Disabled view reported "3 expiring triggers" for three that had already stopped.
+    const stop = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+    const enabled = baseSchedule({ Id: 70, StopProcessDate: stop, folderId: 700 })
+    const disabled = baseSchedule({ Id: 71, Enabled: false, StopProcessDate: stop, folderId: 700 })
+
+    expect(metricValues([enabled, disabled], 'all').Expiring).toBe(1)
+    expect(metricValues([disabled], 'disabled').Expiring).toBe(0)
+  })
+
   it('names the active horizon in the Expiring description, so tooltip and toggle agree', () => {
     const { start, end } = dayRange(new Date(2026, 4, 6))
     const descriptionFor = (horizonDays: number) =>

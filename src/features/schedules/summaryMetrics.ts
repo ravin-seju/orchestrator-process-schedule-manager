@@ -3,7 +3,7 @@ import {
 } from './calendarDisplay'
 import { defaultLifecycleHorizonDays, lifecycleHorizonLabel } from './constants'
 import type { ProcessSchedule } from './orchestrator'
-import { getAssignedMachineIds, getAssignedRobotIds, getCachedScheduleOccurrences, getLifecycleStatus, isLifecycleAttention, isQueueTrigger, isStaleSchedule } from './scheduleUtils'
+import { getAssignedMachineIds, getAssignedRobotIds, getCachedScheduleOccurrences, isQueueTrigger, isStaleSchedule, lifecycleMarkerTone } from './scheduleUtils'
 import type { StatusFilter } from './types'
 
 export type SummaryMetricKey =
@@ -101,13 +101,17 @@ const countStale = (schedules: ProcessSchedule[]): number => {
 
 // Reads the selected horizon rather than a constant, so the tooltip always matches the toggle.
 export const expiringDescription = (horizonDays: number) =>
-  `Triggers with a scheduled stop date that has already passed or falls within the next ${lifecycleHorizonLabel(horizonDays)}.`
+  `Enabled triggers with a scheduled stop date that has already passed or falls within the next ${lifecycleHorizonLabel(horizonDays)}.`
 
+// Counts exactly what draws an amber marker, by calling the same predicate the markers call. The
+// "a marker is showing" == "counted by Expiring" invariant is definitional here rather than two
+// expressions that happen to agree. Disabled triggers are excluded because lifecycleMarkerTone
+// excludes them — the same rule countCollisions has always used.
 const countExpiring = (schedules: ProcessSchedule[], horizonDays: number): number => {
   const now = Date.now()
   let count = 0
   for (const s of schedules) {
-    if (isLifecycleAttention(getLifecycleStatus(s, now, horizonDays))) count += 1
+    if (lifecycleMarkerTone(s, now, horizonDays) === 'amber') count += 1
   }
   return count
 }

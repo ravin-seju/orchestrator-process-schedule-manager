@@ -15,12 +15,13 @@ import { defaultLifecycleHorizonDays, recurrenceBucketLabels } from '../constant
 import { formatNumber } from '../formatters'
 import type { ProcessSchedule } from '../orchestrator'
 import {
+  everyStopDateIsPast,
   getLifecycleStatus,
   getScheduleSummary,
   isAutoDisabledByStopDate,
-  isLifecycleAttention,
   isQueueTrigger,
   lifecycleEndLabel,
+  lifecycleMarkerTone,
   resolveMachineNames,
   resolveRobotNames,
   scheduleStopDate,
@@ -147,6 +148,9 @@ export function ScheduleTable({
     }
   }, [schedules])
 
+  // "Ended" once every stop date on screen is already past — the Disabled view's normal state.
+  const endsHeading = everyStopDateIsPast(schedules) ? 'Ended' : 'Ends'
+
   // Machine/Robot cell: first value inline, "+N" overflow badge with the full list on
   // hover; a single value renders plain; no data renders an em dash.
   const resourceCell = (names: string[], cls: string) => {
@@ -200,7 +204,7 @@ export function ScheduleTable({
               <th>Robot</th>
               <th>Trigger Type</th>
               <th>Pattern</th>
-              <th>Ends</th>
+              <th>{endsHeading}</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -219,10 +223,10 @@ export function ScheduleTable({
               const patternLabel = isQueue ? '—' : getScheduleSummary(schedule)
               const patternTitle = isQueue ? 'Queue-driven trigger — no time-based pattern' : patternLabel
               const lifecycleStatus = getLifecycleStatus(schedule, undefined, horizonDays)
-              // Every stop date gets a marker now; the horizon only decides whether it is the
-              // amber "act soon" one or the muted "exists, not yet" one.
               const lifecycleStopDate = scheduleStopDate(schedule)
-              const isSoon = isLifecycleAttention(lifecycleStatus)
+              // null for a disabled trigger — see lifecycleMarkerTone. The Ends date still shows.
+              const markerTone = lifecycleMarkerTone(schedule, undefined, horizonDays)
+              const isSoon = markerTone === 'amber'
 
               return (
                 <tr key={`${schedule.folderId}-${schedule.Id}`} style={folderAccentStyle(schedule.folderName)}>
@@ -262,7 +266,7 @@ export function ScheduleTable({
                   </td>
                   <td className="table-pattern">
                     <span className="table-pattern-cell">
-                      {lifecycleStopDate ? (
+                      {markerTone && lifecycleStopDate ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span

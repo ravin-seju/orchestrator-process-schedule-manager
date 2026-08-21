@@ -10,7 +10,7 @@ import {
   buildDensitySegments,
   groupAccentStyle,
 } from '../calendarDisplay'
-import { getLifecycleStatus, isLifecycleAttention, lifecycleEndLabel, scheduleStopDate } from '../scheduleUtils'
+import { getLifecycleStatus, lifecycleEndLabel, lifecycleMarkerTone, scheduleStopDate } from '../scheduleUtils'
 import type { ScheduleOccurrence } from '../scheduleUtils'
 import type { CalendarSpanBar, ProcessDayGroup, ViewMode } from '../types'
 
@@ -52,7 +52,8 @@ export const ProcessTimelineRow = memo(function ProcessTimelineRow({
   const rowModeClass = `mode-${viewMode}`
   const lifecycleStatus = getLifecycleStatus(item.schedule, undefined, horizonDays)
   const lifecycleStopDate = scheduleStopDate(item.schedule)
-  const isSoon = isLifecycleAttention(lifecycleStatus)
+  const markerTone = lifecycleMarkerTone(item.schedule, undefined, horizonDays)
+  const isSoon = markerTone === 'amber'
   const lifecycleSuffix = lifecycleStopDate
     ? ` · ${lifecycleEndLabel(item.schedule, lifecycleStopDate)}`
     : ''
@@ -67,7 +68,7 @@ export const ProcessTimelineRow = memo(function ProcessTimelineRow({
           type="button"
         >
           <span className="process-row-copy">
-            {lifecycleStopDate ? (
+            {markerTone ? (
               <span
                 className={`lifecycle-dot lifecycle-${lifecycleStatus}${isSoon ? '' : ' is-later'}`}
                 aria-hidden="true"
@@ -99,7 +100,8 @@ export const ProcessSpanBar = memo(function ProcessSpanBar({
   const title = `${item.schedule.Name} · ${item.patternLabel} · ${bar.timingLabel}`
   const lifecycleStatus = getLifecycleStatus(item.schedule, undefined, horizonDays)
   const lifecycleStopDate = scheduleStopDate(item.schedule)
-  const isSoon = isLifecycleAttention(lifecycleStatus)
+  const markerTone = lifecycleMarkerTone(item.schedule, undefined, horizonDays)
+  const isSoon = markerTone === 'amber'
   const lifecycleSuffix = lifecycleStopDate
     ? ` · ${lifecycleEndLabel(item.schedule, lifecycleStopDate)}`
     : ''
@@ -122,7 +124,7 @@ export const ProcessSpanBar = memo(function ProcessSpanBar({
           type="button"
         >
           <span className="calendar-span-copy">
-            {lifecycleStopDate ? (
+            {markerTone ? (
               <span
                 className={`lifecycle-dot lifecycle-${lifecycleStatus}${isSoon ? '' : ' is-later'}`}
                 aria-hidden="true"

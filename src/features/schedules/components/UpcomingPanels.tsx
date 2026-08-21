@@ -14,11 +14,11 @@ import { maxDetailTimeChips, maxHighFrequencyDetailTimeChips, maxInlineDetailMac
 import { formatNumber } from '../formatters'
 import {
   getLifecycleStatus,
-  scheduleStopDate,
-  isLifecycleAttention,
   lifecycleEndLabel,
+  lifecycleMarkerTone,
   resolveMachineNames,
   resolveRobotNames,
+  scheduleStopDate,
   shortDateLabel,
   timeLabel,
 } from '../scheduleUtils'
@@ -158,7 +158,8 @@ export function DayDetailsPanel({
               : []
             const lifecycleStatus = getLifecycleStatus(group.schedule, undefined, horizonDays)
             const lifecycleStopDate = scheduleStopDate(group.schedule)
-            const lifecycleIsSoon = isLifecycleAttention(lifecycleStatus)
+            const lifecycleTone = lifecycleMarkerTone(group.schedule, undefined, horizonDays)
+            const lifecycleIsSoon = lifecycleTone === 'amber'
             // Only label a strategy Orchestrator actually reported. StopStrategy is optional, so a
             // two-way `=== 'Kill'` test would render an unset strategy as a configured "Soft Stop".
             const stopStrategyLabel =
@@ -175,7 +176,7 @@ export function DayDetailsPanel({
                 style={folderColorVars(group.schedule.folderName)}
               >
                 <div className="day-detail-group-heading">
-                  {lifecycleStopDate ? (
+                  {lifecycleTone && lifecycleStopDate ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span

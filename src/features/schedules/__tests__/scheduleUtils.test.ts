@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   buildEffectiveScheduleMachineIds,
   deriveFolderScopeSelection,
+  everyStopDateIsPast,
+  lifecycleMarkerTone,
   deriveMachineScopeSelection,
   formatRobotDisplayName,
   fullDateTimeLabel,
@@ -245,6 +247,67 @@ describe('scheduleStopDate', () => {
   it('returns the parsed instant when the stop date is valid', () => {
     const iso = new Date(Date.UTC(2027, 11, 18, 8, 30)).toISOString()
     expect(scheduleStopDate(makeSchedule(1, { StopProcessDate: iso }))?.toISOString()).toBe(iso)
+  })
+})
+
+describe('lifecycleMarkerTone', () => {
+  const now = new Date(2026, 7, 20, 12, 0, 0).getTime()
+  const past = new Date(2026, 7, 15).toISOString()
+  const soon = new Date(2026, 7, 23).toISOString()
+  const farOff = new Date(2028, 7, 23).toISOString()
+
+  it('is amber inside the horizon and muted beyond it', () => {
+    expect(lifecycleMarkerTone(makeSchedule(1, { StopProcessDate: past }), now)).toBe('amber')
+    expect(lifecycleMarkerTone(makeSchedule(2, { StopProcessDate: soon }), now)).toBe('amber')
+    expect(lifecycleMarkerTone(makeSchedule(3, { StopProcessDate: farOff }), now)).toBe('muted')
+  })
+
+  it('is null for a disabled trigger whatever its stop date', () => {
+    // A disabled trigger will not run, so no lifecycle urgency applies — this is what removes the
+    // amber hourglass from every row of the Disabled inventory view.
+    for (const stop of [past, soon, farOff]) {
+      expect(lifecycleMarkerTone(makeSchedule(1, { Enabled: false, StopProcessDate: stop }), now)).toBeNull()
+    }
+  })
+
+  it('is null when there is no stop date at all', () => {
+    expect(lifecycleMarkerTone(makeSchedule(1), now)).toBeNull()
+  })
+
+  it('follows the horizon, so a 90-day stop date flips from muted to amber', () => {
+    const in90Days = makeSchedule(1, {
+      StopProcessDate: new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+
+    expect(lifecycleMarkerTone(in90Days, now, 14)).toBe('muted')
+    expect(lifecycleMarkerTone(in90Days, now, 365)).toBe('amber')
+  })
+})
+
+describe('everyStopDateIsPast', () => {
+  const now = new Date(2026, 7, 20, 12, 0, 0).getTime()
+  const past = makeSchedule(1, { StopProcessDate: new Date(2026, 7, 15).toISOString() })
+  const future = makeSchedule(2, { StopProcessDate: new Date(2026, 7, 25).toISOString() })
+  const none = makeSchedule(3)
+
+  it('is true only when at least one stop date exists and all of them are past', () => {
+    expect(everyStopDateIsPast([past], now)).toBe(true)
+    expect(everyStopDateIsPast([past, none], now)).toBe(true)
+    expect(everyStopDateIsPast([past, future], now)).toBe(false)
+    expect(everyStopDateIsPast([future], now)).toBe(false)
+  })
+
+  it('is false when nothing has a stop date, so the column stays future-tense', () => {
+    expect(everyStopDateIsPast([none], now)).toBe(false)
+    expect(everyStopDateIsPast([], now)).toBe(false)
+  })
+
+  it('ignores the Enabled flag — the heading follows dates, not status', () => {
+    const disabledFuture = makeSchedule(4, {
+      Enabled: false,
+      StopProcessDate: new Date(2026, 7, 25).toISOString(),
+    })
+    expect(everyStopDateIsPast([disabledFuture], now)).toBe(false)
   })
 })
 

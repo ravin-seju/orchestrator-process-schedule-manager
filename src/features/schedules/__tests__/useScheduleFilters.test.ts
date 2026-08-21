@@ -101,6 +101,14 @@ describe('applyAttentionFilter', () => {
     expect(applyAttentionFilter([in30Days], 'expiring', undefined, undefined, undefined, 30)).toEqual([in30Days])
   })
 
+  it('excludes disabled triggers from the "expiring" filter, matching the metric', () => {
+    const stop = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+    const enabled = makeSchedule(1, { StopProcessDate: stop })
+    const disabled = makeSchedule(2, { Enabled: false, StopProcessDate: stop })
+
+    expect(applyAttentionFilter([enabled, disabled], 'expiring')).toEqual([enabled])
+  })
+
   it('round-trips back to the full set when toggled back to "none"', () => {
     const schedules = [
       makeSchedule(1, { StopProcessDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() }),

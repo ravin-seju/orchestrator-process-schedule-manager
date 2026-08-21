@@ -3,7 +3,7 @@ import { buildScheduleSearchIndex, classifyRecurrenceBucket } from '../calendarD
 import type { ProcessSchedule } from '../orchestrator'
 import { defaultLifecycleHorizonDays } from '../constants'
 import { measurePerformance } from '../performance'
-import { getAssignedMachineIds, getAssignedRobotIds, getCachedScheduleOccurrences, getLifecycleStatus, isAutoDisabledByStopDate, isLifecycleAttention, isQueueTrigger, isStaleSchedule } from '../scheduleUtils'
+import { getAssignedMachineIds, getAssignedRobotIds, getCachedScheduleOccurrences, isAutoDisabledByStopDate, isQueueTrigger, isStaleSchedule, lifecycleMarkerTone } from '../scheduleUtils'
 import type { AttentionFilter, StatusFilter, TriggerTypeFilter } from '../types'
 
 const COLLISION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
@@ -117,9 +117,11 @@ export const applyAttentionFilter = (
     return matches.filter((s) => colliding.has(s))
   }
 
+  // Same predicate the metric and the markers use, so the tile's count and the filtered row set
+  // can never disagree — including on the disabled triggers all three now exclude.
   if (attentionFilter === 'expiring') {
     const now = Date.now()
-    return matches.filter((s) => isLifecycleAttention(getLifecycleStatus(s, now, horizonDays)))
+    return matches.filter((s) => lifecycleMarkerTone(s, now, horizonDays) === 'amber')
   }
 
   // Horizon-independent on purpose: an auto-disabled trigger is already past its stop date, so

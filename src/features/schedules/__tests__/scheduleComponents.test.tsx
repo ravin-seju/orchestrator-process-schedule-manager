@@ -1830,8 +1830,51 @@ describe('ScheduleTable component', () => {
 
     const statuses = Array.from(container.querySelectorAll('.status')).map((s) => s.textContent)
     expect(statuses).toEqual(['Auto-disabled', 'Disabled', 'Enabled'])
-    // The row still carries its lifecycle marker — the two signals are independent.
-    expect(container.querySelectorAll('.lifecycle-badge')).toHaveLength(1)
+    // No marker on a disabled trigger: it is not going to run, so an urgent amber hourglass would
+    // be pointing at an event that has already happened, right beside a Status cell that says
+    // "Auto-disabled". The date still shows in the Ends column.
+    expect(container.querySelectorAll('.lifecycle-badge')).toHaveLength(0)
+    expect(container.querySelector('.table-ends')?.textContent).not.toBe('—')
+  })
+
+  it('drops the marker but keeps the date for a disabled trigger whose stop date is still ahead', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 74,
+        Name: 'Switched Off Before Its End Date',
+        Enabled: false,
+        StopProcessDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    ]
+
+    const { container } = render(<ScheduleTable schedules={schedules} />)
+
+    expect(container.querySelectorAll('.lifecycle-badge')).toHaveLength(0)
+    // Still future-tense, because the heading follows the dates, not the Enabled flag.
+    expect(container.querySelector('thead th:nth-child(9)')?.textContent).toBe('Ends')
+  })
+
+  it('heads the column "Ended" only when every stop date on screen is already past', () => {
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+    const heading = (schedules: ProcessSchedule[]) => {
+      const { container } = render(<ScheduleTable schedules={schedules} />)
+      const text = container.querySelector('thead th:nth-child(9)')?.textContent
+      cleanup()
+      return text
+    }
+
+    expect(heading([baseSchedule({ Id: 75, StopProcessDate: past })])).toBe('Ended')
+    expect(heading([baseSchedule({ Id: 76, StopProcessDate: future })])).toBe('Ends')
+    // Mixed tenses cannot both be right, so the column stays future-tense.
+    expect(
+      heading([
+        baseSchedule({ Id: 77, StopProcessDate: past }),
+        baseSchedule({ Id: 78, StopProcessDate: future }),
+      ]),
+    ).toBe('Ends')
+    // No stop dates at all: nothing has ended, so "Ends".
+    expect(heading([baseSchedule({ Id: 79 })])).toBe('Ends')
   })
 
   it('gives an amber marker only to the triggers the Expiring metric counts, gray to the rest', () => {

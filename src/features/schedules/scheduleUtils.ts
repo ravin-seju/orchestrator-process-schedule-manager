@@ -663,6 +663,48 @@ export const scheduleStopDate = (schedule: ProcessSchedule): Date | null => {
 export const stopDateLabel = (schedule: ProcessSchedule, date: Date) =>
   yearDateLabel(date, scheduleTimeZone(schedule))
 
+// True when at least one schedule has a stop date and every one of them is in the past — the test
+// behind the inventory column heading ("Ended" vs "Ends"). Derived from the rows rather than from
+// the status filter, so a trigger switched off by hand before its stop date still reads "Ends".
+// Lives here, not in the component, because reading the clock in a component body trips
+// react-hooks/purity — the same reason getLifecycleStatus defaults nowMs internally.
+export const everyStopDateIsPast = (
+  schedules: ProcessSchedule[],
+  nowMs: number = Date.now(),
+): boolean => {
+  let sawStopDate = false
+  for (const schedule of schedules) {
+    const stop = scheduleStopDate(schedule)
+    if (!stop) continue
+    sawStopDate = true
+    if (stop.getTime() >= nowMs) return false
+  }
+
+  return sawStopDate
+}
+
+// The one decision every lifecycle marker makes, in one place:
+//   null    — nothing to show (no stop date, or the trigger is disabled)
+//   'amber' — inside the selected horizon; glows, and is exactly what the Expiring metric counts
+//   'muted' — has a stop date beyond the horizon; visible but deliberately not urgent
+//
+// A DISABLED trigger gets no marker at all. It is not going to run, so "ends soon" is not a thing
+// anyone can act on — an already-auto-disabled trigger would otherwise wear an urgent amber marker
+// for an event that has already happened, next to a Status cell that says "Auto-disabled". The
+// auto-disabled notice is where that trigger belongs. This mirrors countCollisions, which has
+// always skipped disabled triggers for the same reason.
+export const lifecycleMarkerTone = (
+  schedule: ProcessSchedule,
+  nowMs: number = Date.now(),
+  horizonDays?: number,
+): 'amber' | 'muted' | null => {
+  if (!schedule.Enabled) return null
+  const status = getLifecycleStatus(schedule, nowMs, horizonDays)
+  if (!status) return null
+
+  return isLifecycleAttention(status) ? 'amber' : 'muted'
+}
+
 // The Expiring metric, the 'expiring' attention filter, and every lifecycle marker in the UI all
 // gate on this, so "a marker is showing" always means exactly "counted by the Expiring metric".
 // 'ending' (a stop date beyond EXPIRING_SOON_DAYS) is deliberately excluded: it is informational,
