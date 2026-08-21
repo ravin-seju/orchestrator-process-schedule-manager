@@ -14,6 +14,7 @@ import { maxDetailTimeChips, maxHighFrequencyDetailTimeChips, maxInlineDetailMac
 import { formatNumber } from '../formatters'
 import {
   getLifecycleStatus,
+  scheduleStopDate,
   isLifecycleAttention,
   lifecycleEndLabel,
   resolveMachineNames,
@@ -98,6 +99,7 @@ export function UpcomingPill({
 export function DayDetailsPanel({
   selectedDay,
   occurrences,
+  horizonDays,
   onClose,
   runtimeStats,
   robotNames,
@@ -106,6 +108,7 @@ export function DayDetailsPanel({
 }: {
   selectedDay: SelectedDayDetail
   occurrences: ScheduleOccurrence[]
+  horizonDays?: number
   onClose: () => void
   runtimeStats?: Map<number, RuntimeStats>
   robotNames?: Map<number, string>
@@ -153,11 +156,9 @@ export function DayDetailsPanel({
             const groupMachines = showRunInfo
               ? resolveMachineNames(group.schedule.Id, scheduleMachineIds, machineNames)
               : []
-            const lifecycleStatus = getLifecycleStatus(group.schedule)
-            const lifecycleStopDate =
-              isLifecycleAttention(lifecycleStatus) && group.schedule.StopProcessDate
-                ? new Date(group.schedule.StopProcessDate)
-                : null
+            const lifecycleStatus = getLifecycleStatus(group.schedule, undefined, horizonDays)
+            const lifecycleStopDate = scheduleStopDate(group.schedule)
+            const lifecycleIsSoon = isLifecycleAttention(lifecycleStatus)
             // Only label a strategy Orchestrator actually reported. StopStrategy is optional, so a
             // two-way `=== 'Kill'` test would render an unset strategy as a configured "Soft Stop".
             const stopStrategyLabel =
@@ -178,7 +179,7 @@ export function DayDetailsPanel({
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span
-                          className={`lifecycle-badge lifecycle-${lifecycleStatus}`}
+                          className={`lifecycle-badge lifecycle-${lifecycleStatus}${lifecycleIsSoon ? '' : ' is-later'}`}
                           role="img"
                           aria-label={lifecycleEndLabel(group.schedule, lifecycleStopDate)}
                         >

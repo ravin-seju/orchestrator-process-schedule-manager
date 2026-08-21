@@ -58,6 +58,49 @@ describe('applyAttentionFilter', () => {
     expect(result).toEqual([autoDisabled])
   })
 
+  it('widens the "expiring" set as the horizon grows', () => {
+    const in90Days = makeSchedule(1, {
+      StopProcessDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+    const in2Years = makeSchedule(2, {
+      StopProcessDate: new Date(Date.now() + 730 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+    const schedules = [in90Days, in2Years]
+
+    expect(applyAttentionFilter(schedules, 'expiring', undefined, undefined, undefined, 14)).toEqual([])
+    expect(applyAttentionFilter(schedules, 'expiring', undefined, undefined, undefined, 90)).toEqual([in90Days])
+    expect(applyAttentionFilter(schedules, 'expiring', undefined, undefined, undefined, 365)).toEqual([in90Days])
+    // Nothing reaches two years, so the widest preset still excludes it.
+    expect(
+      applyAttentionFilter(schedules, 'expiring', undefined, undefined, undefined, 365),
+    ).not.toContain(in2Years)
+  })
+
+  it('does not move the "expired" set when the horizon changes', () => {
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const autoDisabled = makeSchedule(1, { Enabled: false, StopProcessDate: past })
+    const disabledFarFuture = makeSchedule(2, {
+      Enabled: false,
+      StopProcessDate: new Date(Date.now() + 730 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+    const schedules = [autoDisabled, disabledFarFuture]
+
+    for (const horizon of [14, 30, 90, 365]) {
+      expect(
+        applyAttentionFilter(schedules, 'expired', undefined, undefined, undefined, horizon),
+      ).toEqual([autoDisabled])
+    }
+  })
+
+  it('defaults to the 14-day window when no horizon is passed', () => {
+    const in30Days = makeSchedule(1, {
+      StopProcessDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+
+    expect(applyAttentionFilter([in30Days], 'expiring')).toEqual([])
+    expect(applyAttentionFilter([in30Days], 'expiring', undefined, undefined, undefined, 30)).toEqual([in30Days])
+  })
+
   it('round-trips back to the full set when toggled back to "none"', () => {
     const schedules = [
       makeSchedule(1, { StopProcessDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() }),

@@ -24,6 +24,24 @@ export const maxInlineDetailMachines = 4
 export const pickerSearchThreshold = 8
 export const maxUpcomingItemsPerGroup = 12
 export const EXPIRING_SOON_DAYS = 14
+
+// The selectable "expiring within" window. It moves the amber-marker / Expiring-metric boundary
+// only — the inventory "Ends" column is uncapped and ignores this entirely. EXPIRING_SOON_DAYS
+// stays the default so a first load behaves exactly as it did before the selector existed.
+export const lifecycleHorizonOptions: { days: number; label: string }[] = [
+  { days: EXPIRING_SOON_DAYS, label: '14d' },
+  { days: 30, label: '30d' },
+  { days: 90, label: '90d' },
+  { days: 365, label: '1y' },
+]
+export const defaultLifecycleHorizonDays = EXPIRING_SOON_DAYS
+export const lifecycleHorizonStorageKey = 'process-schedule-manager.lifecycle-horizon'
+
+// The metric description and the toggle must agree, so both read the label from the same list.
+// Falls back to a plain day count if a horizon ever comes from outside the preset list.
+export const lifecycleHorizonLabel = (days: number) =>
+  lifecycleHorizonOptions.find((option) => option.days === days)?.label ?? `${days}d`
+
 export const legacyTimelineModeStorageKey = 'process-calendar.timeline-mode'
 export const viewModeStorageKey = 'process-schedule-manager.view-mode'
 export const defaultViewMode: ViewMode = 'spanBars'

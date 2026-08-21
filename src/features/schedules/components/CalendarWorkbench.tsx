@@ -41,6 +41,7 @@ const CalendarDayCell = memo(function CalendarDayCell({
   day,
   dayDisplayItems,
   dayKey,
+  horizonDays,
   onOpenDayDetail,
   setSelectedDayDetail,
   shouldRenderSpanBars,
@@ -53,6 +54,7 @@ const CalendarDayCell = memo(function CalendarDayCell({
   day: Date
   dayDisplayItems: CalendarDisplayItem[]
   dayKey: string
+  horizonDays?: number
   onOpenDayDetail: (item: ProcessDayGroup) => void
   setSelectedDayDetail: (detail: SelectedDayDetail) => void
   shouldRenderSpanBars: boolean
@@ -82,6 +84,7 @@ const CalendarDayCell = memo(function CalendarDayCell({
         {visibleItems.map((item) => (
           <ProcessTimelineRow
             compact={calendarMode === 'month'}
+            horizonDays={horizonDays}
             item={item}
             key={item.id}
             onOpen={onOpenDayDetail}
@@ -110,6 +113,7 @@ export const CalendarWorkbench = memo(function CalendarWorkbench({
   calendarRenderMode,
   calendarTitle,
   calendarWeekCount,
+  horizonDays,
   moveCalendar,
   navigationUnitLabel,
   onOpenDayDetail,
@@ -134,6 +138,7 @@ export const CalendarWorkbench = memo(function CalendarWorkbench({
   calendarRenderMode: ViewMode
   calendarTitle: string
   calendarWeekCount: number
+  horizonDays?: number
   moveCalendar: (delta: number) => void
   navigationUnitLabel: string
   onOpenDayDetail: (item: ProcessDayGroup) => void
@@ -262,6 +267,7 @@ export const CalendarWorkbench = memo(function CalendarWorkbench({
         <OutlookWeekView
           calendarDays={calendarDays}
           calendarItemsByDay={calendarItemsByDay}
+          horizonDays={horizonDays}
           onOpenDayDetail={onOpenDayDetail}
           onOpenTimeSlot={setSelectedDayDetail}
           runtimeStats={runtimeStats}
@@ -298,6 +304,7 @@ export const CalendarWorkbench = memo(function CalendarWorkbench({
                 day={day}
                 dayDisplayItems={dayDisplayItems}
                 dayKey={key}
+                horizonDays={horizonDays}
                 key={key}
                 onOpenDayDetail={onOpenDayDetail}
                 setSelectedDayDetail={setSelectedDayDetail}
@@ -310,7 +317,7 @@ export const CalendarWorkbench = memo(function CalendarWorkbench({
           })}
           {shouldRenderSpanBars
             ? spanBars.map((bar) => (
-                <ProcessSpanBar bar={bar} key={bar.id} onOpen={onOpenDayDetail} />
+                <ProcessSpanBar bar={bar} horizonDays={horizonDays} key={bar.id} onOpen={onOpenDayDetail} />
               ))
             : null}
         </div>

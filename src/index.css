@@ -1721,11 +1721,52 @@ h3 {
   min-width: 0;
 }
 
+/* Wraps rather than overflows: this row already carries up to four alert chips, and the horizon
+   control is a fifth item. Wrapping drops it to a second line at narrow widths instead of
+   colliding with the metric tiles to its left. */
 .header-metric-actions {
   align-items: center;
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.header-alert-chips {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.header-horizon {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.header-horizon-label {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+/* .ui-toggle-group is `inline-grid` with no default column count, so every usage declares its
+   own — without this the four segments stack into a 98px-tall vertical column. */
+.header-horizon .ui-toggle-group {
+  grid-template-columns: repeat(4, minmax(34px, 1fr));
+}
+
+/* A day-range toggle is only meaningful next to its noun, so the label is not optional chrome.
+   Compact segments keep the five-item row on one line as long as the viewport allows. */
+.header-horizon .ui-toggle-item {
+  font-size: var(--font-xs);
+  min-height: 24px;
+  padding: 0 8px;
 }
 
 .header-metric-item {
@@ -4256,8 +4297,27 @@ button.year-day {
   width: var(--inventory-pattern-width, 280px);
 }
 
+.ends-column {
+  width: var(--inventory-ends-width, 96px);
+}
+
 .status-column {
   width: var(--inventory-status-width, 96px);
+}
+
+/* Uncapped and horizon-independent: every stop date shows here, however distant, which is why the
+   label carries a year. Amber inside the horizon, muted beyond it — matching the row's marker.
+   Scoped by .inventory-table on purpose: `.inventory-table th, .inventory-table td` sets
+   color: var(--text) at (0,1,1), which outranks a bare .table-ends at (0,1,0) no matter the
+   source order. Measured, not assumed — a bare selector here rendered --text. */
+.inventory-table .table-ends {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+.inventory-table .table-ends.is-soon {
+  color: var(--warning);
 }
 
 .inventory-table td:nth-child(3),
@@ -4280,13 +4340,24 @@ button.year-day {
 /* One amber treatment for every lifecycle marker on every surface — the badge (inventory table +
    details panel) and the dot (calendar chips) share --warning, the same token behind
    --metric-expiring, so the "Expiring" header metric and the markers it counts always agree.
-   Only expired / expiring-soon ever render (see isLifecycleAttention), so every marker glows. */
+   Anything inside the selected horizon (see isLifecycleAttention) glows amber; anything beyond it
+   takes .is-later below. */
 .lifecycle-badge,
 .lifecycle-dot {
   animation: lifecycle-glow 1.6s ease-in-out infinite;
   background: var(--warning);
   border-radius: 999px;
   flex-shrink: 0;
+}
+
+/* Beyond the horizon: a stop date exists but is not yet actionable. Neutral gray, and NO glow —
+   the pulse is the urgency signal, so a non-urgent marker must not have it. Deliberately not a
+   third warm colour: --danger and --warning are ~18deg apart at the same lightness and cannot be
+   told apart at this size, which is why per-status colouring was collapsed to one amber. */
+.lifecycle-badge.is-later,
+.lifecycle-dot.is-later {
+  animation: none;
+  background: var(--text-muted);
 }
 
 .lifecycle-badge {

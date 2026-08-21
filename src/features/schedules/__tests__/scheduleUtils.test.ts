@@ -11,8 +11,10 @@ import {
   isLifecycleAttention,
   isStaleSchedule,
   lifecycleEndLabel,
+  scheduleStopDate,
+  stopDateLabel,
 } from '../scheduleUtils'
-import { EXPIRING_SOON_DAYS } from '../constants'
+import { EXPIRING_SOON_DAYS, lifecycleHorizonOptions } from '../constants'
 import type { ProcessSchedule } from '../orchestrator'
 
 function makeSchedule(
@@ -192,6 +194,81 @@ describe('getLifecycleStatus', () => {
     })
     expect(getLifecycleStatus(s, now)).toBe('expired')
   })
+
+  it('moves the expiring-soon boundary with an explicit horizon', () => {
+    const in90Days = makeSchedule(1, {
+      StopProcessDate: new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+
+    expect(getLifecycleStatus(in90Days, now, 14)).toBe('ending')
+    expect(getLifecycleStatus(in90Days, now, 90)).toBe('expiring-soon')
+    expect(getLifecycleStatus(in90Days, now, 365)).toBe('expiring-soon')
+  })
+
+  it('leaves a two-year-out stop date beyond every selectable horizon', () => {
+    const in2Years = makeSchedule(1, {
+      StopProcessDate: new Date(now + 730 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+
+    for (const option of lifecycleHorizonOptions) {
+      expect(getLifecycleStatus(in2Years, now, option.days)).toBe('ending')
+    }
+  })
+
+  it('treats an already-past stop date as expired at every horizon', () => {
+    const past = makeSchedule(1, {
+      StopProcessDate: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+    })
+
+    // 'expired' is horizon-invariant, which is what lets isAutoDisabledByStopDate and
+    // lifecycleEndLabel skip the parameter entirely.
+    for (const days of [1, 14, 90, 365, 10_000]) {
+      expect(getLifecycleStatus(past, now, days)).toBe('expired')
+    }
+  })
+
+  it('defaults to EXPIRING_SOON_DAYS when no horizon is given', () => {
+    const atBoundary = makeSchedule(1, {
+      StopProcessDate: new Date(now + EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+    })
+
+    expect(getLifecycleStatus(atBoundary, now)).toBe(getLifecycleStatus(atBoundary, now, EXPIRING_SOON_DAYS))
+  })
+})
+
+describe('scheduleStopDate', () => {
+  it('returns null for a missing or unparseable stop date', () => {
+    expect(scheduleStopDate(makeSchedule(1))).toBeNull()
+    expect(scheduleStopDate(makeSchedule(1, { StopProcessDate: 'not-a-date' }))).toBeNull()
+  })
+
+  it('returns the parsed instant when the stop date is valid', () => {
+    const iso = new Date(Date.UTC(2027, 11, 18, 8, 30)).toISOString()
+    expect(scheduleStopDate(makeSchedule(1, { StopProcessDate: iso }))?.toISOString()).toBe(iso)
+  })
+})
+
+describe('stopDateLabel', () => {
+  const stop = new Date(Date.UTC(2027, 11, 18, 14, 30))
+
+  it('includes the year, so a distant stop date is unambiguous', () => {
+    const label = stopDateLabel(makeSchedule(1, { TimeZoneIana: 'UTC' }), stop)
+    expect(label).toContain('2027')
+    expect(label).toContain('Dec')
+  })
+
+  it("renders in the schedule's own timezone, not the viewer's", () => {
+    // 14:30 UTC on 18 Dec is still 18 Dec in Chicago but already 19 Dec in Auckland, so the two
+    // labels must differ — proof the zone is applied rather than ignored.
+    const chicago = stopDateLabel(makeSchedule(1, { TimeZoneIana: 'America/Chicago' }), stop)
+    const auckland = stopDateLabel(makeSchedule(2, { TimeZoneIana: 'Pacific/Auckland' }), stop)
+
+    expect(chicago).not.toBe(auckland)
+  })
+
+  it('falls back to the host zone for an invalid IANA name instead of throwing', () => {
+    expect(() => stopDateLabel(makeSchedule(1, { TimeZoneIana: 'Not/AZone' }), stop)).not.toThrow()
+  })
 })
 
 describe('isLifecycleAttention', () => {
@@ -297,6 +374,32 @@ describe('lifecycleEndLabel', () => {
 
     expect(lifecycleEndLabel(stillEnabled, new Date(stop), now)).toMatch(/^Ended on /)
     expect(lifecycleEndLabel(disabled, new Date(stop), now)).toMatch(/^Ended on /)
+  })
+
+  it('keeps the future tense for a far-future stop date no matter the horizon', () => {
+    // The horizon decides urgency, not tense. A trigger ending in two years reads "Ends", whether
+    // or not the selected window happens to count it as expiring.
+    const stop = new Date(2028, 7, 15)
+    const schedule = makeSchedule(1, { StopProcessDate: stop.toISOString() })
+
+    expect(lifecycleEndLabel(schedule, stop, now)).toMatch(/^Ends /)
+  })
+})
+
+describe('horizon-independence of the expired helpers', () => {
+  const now = new Date(2026, 7, 20, 12, 0, 0).getTime()
+  const past = new Date(2026, 7, 15).toISOString()
+
+  it('isAutoDisabledByStopDate takes no horizon, so widening the window cannot change it', () => {
+    const autoDisabled = makeSchedule(1, { Enabled: false, StopProcessDate: past })
+    const farFutureDisabled = makeSchedule(2, {
+      Enabled: false,
+      StopProcessDate: new Date(2028, 7, 15).toISOString(),
+    })
+
+    expect(isAutoDisabledByStopDate(autoDisabled, now)).toBe(true)
+    // Disabled by hand well before its stop date — never auto-disabled at any horizon.
+    expect(isAutoDisabledByStopDate(farFutureDisabled, now)).toBe(false)
   })
 })
 

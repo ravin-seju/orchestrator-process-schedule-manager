@@ -162,13 +162,17 @@ const buildScheduleTiming = (bucket: StressBucket, index: number) => {
   }
 }
 
-// A few generated schedules get a StopProcessDate — one bucket already past (expired), one within
-// EXPIRING_SOON_DAYS (expiring-soon), one far out (ending) — so /testing?stress=50 shows a mix.
+// A few generated schedules get a StopProcessDate, one per horizon preset boundary, so
+// /testing?stress=50 exercises every state the selector can produce:
+//   already past (expired), +3d (inside every preset), +90d (flips at the 90d preset), and
+//   ~2 years out (beyond every preset — the only fixture that stays gray at 1y, and the one that
+//   proves the uncapped "Ends" column renders a year rather than a bare day and month).
 const stopProcessDateForIndex = (index: number): string | null => {
   const mod = index % 20
   if (mod === 0) return new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
   if (mod === 5) return new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
   if (mod === 10) return new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
+  if (mod === 15) return new Date(Date.now() + 730 * 24 * 60 * 60 * 1000).toISOString()
   return null
 }
 

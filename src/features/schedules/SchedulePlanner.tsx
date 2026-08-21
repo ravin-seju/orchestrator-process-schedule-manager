@@ -33,6 +33,9 @@ import {
   defaultTenantName,
   monthSpanLaneStepPx,
   monthSpanReservedHeightPx,
+  defaultLifecycleHorizonDays,
+  lifecycleHorizonOptions,
+  lifecycleHorizonStorageKey,
   viewModeStorageKey,
   weekVisibleSpanRows,
 } from './constants'
@@ -86,6 +89,20 @@ const dayRangeFromKey = (key: string) => {
   end.setHours(23, 59, 59, 999)
 
   return { start, end }
+}
+
+// Validated against the preset list rather than trusted: a stored value from a changed preset list
+// (or a hand-edited key) must not strand the header on a horizon the toggle cannot represent.
+const readStoredHorizonDays = (): number => {
+  try {
+    const stored = Number(window.localStorage.getItem(lifecycleHorizonStorageKey))
+
+    return lifecycleHorizonOptions.some((option) => option.days === stored)
+      ? stored
+      : defaultLifecycleHorizonDays
+  } catch {
+    return defaultLifecycleHorizonDays
+  }
 }
 
 const summaryIconForMetric = (key: SummaryMetricKey) => {
@@ -159,6 +176,7 @@ function Dashboard({
   const [selectedMachineIds, setSelectedMachineIds] = useState<number[]>([])
   const [selectedRobotIds, setSelectedRobotIds] = useState<number[]>([])
   const [autoDisabledNoticeDismissed, setAutoDisabledNoticeDismissed] = useState(false)
+  const [horizonDays, setHorizonDays] = useState<number>(readStoredHorizonDays)
   const calendarGridRef = useRef<HTMLDivElement | null>(null)
 
   const handleFullRefresh = useCallback(() => {
@@ -172,6 +190,14 @@ function Dashboard({
   useEffect(() => {
     window.localStorage.setItem(viewModeStorageKey, viewMode)
   }, [viewMode])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(lifecycleHorizonStorageKey, String(horizonDays))
+    } catch {
+      // Storage full or unavailable — the horizon just resets next load.
+    }
+  }, [horizonDays])
   const folders = data?.folders ?? emptyFolders
   const schedules = data?.schedules ?? emptySchedules
 
@@ -235,6 +261,7 @@ function Dashboard({
   }, [])
   const { filteredSchedules, preAttentionSchedules, trimmedQuery } = useScheduleFilters({
     attentionFilter,
+    horizonDays,
     query,
     schedules,
     scheduleMachineIds: effectiveScheduleMachineIds,
@@ -279,6 +306,7 @@ function Dashboard({
   const summaryMetrics = useMemo(
     () =>
       buildSummaryMetricData({
+        horizonDays,
         schedules: filteredSchedules,
         scheduleMachineIds: effectiveScheduleMachineIds,
         collisionMachineIds: scheduleMachineIds,
@@ -291,7 +319,7 @@ function Dashboard({
         ...metric,
         icon: summaryIconForMetric(metric.key),
       })),
-    [filteredSchedules, effectiveScheduleMachineIds, scheduleMachineIds, selectedMachineIds, selectedRobotIds, statusFilter, todayRange],
+    [filteredSchedules, effectiveScheduleMachineIds, horizonDays, scheduleMachineIds, selectedMachineIds, selectedRobotIds, statusFilter, todayRange],
   )
   const activeMetricKey: SummaryMetricKey | null =
     attentionFilter === 'duplicates'
@@ -379,10 +407,11 @@ function Dashboard({
         selectedMachineIds.length ? new Set(selectedMachineIds) : undefined,
         selectedRobotIds.length ? new Set(selectedRobotIds) : undefined,
         scheduleMachineIds,
+        horizonDays,
       )
       setSelectedFolderIds(Array.from(new Set(matches.map((s) => String(s.folderId)))))
     },
-    [attentionFilter, preAttentionSchedules, selectedMachineIds, selectedRobotIds, scheduleMachineIds],
+    [attentionFilter, horizonDays, preAttentionSchedules, selectedMachineIds, selectedRobotIds, scheduleMachineIds],
   )
   // Selecting a machine auto-narrows the FOLDER picker to where that machine is active
   // (mirrors the metric-tile → folder auto-narrow), and narrows the robot picker's OPTION
@@ -532,10 +561,12 @@ function Dashboard({
         connectionTitle={connectionTitle}
         environmentDisplayLabel={environmentDisplayLabel}
         headerFilterChips={headerFilterChips}
+        horizonDays={horizonDays}
         isLoading={isLoading}
         isRevalidating={isRevalidating}
         metrics={summaryMetrics}
         nextThemeLabel={nextThemeLabel}
+        onHorizonChange={setHorizonDays}
         onManageConnection={onManageConnection}
         onMetricClick={handleMetricClick}
         onTenantChange={(tenantName) => {
@@ -615,6 +646,7 @@ function Dashboard({
             calendarRenderMode={calendarRenderMode}
             calendarTitle={calendarTitle}
             calendarWeekCount={calendarWeekCount}
+            horizonDays={horizonDays}
             moveCalendar={moveCalendar}
             navigationUnitLabel={navigationUnitLabel}
             onOpenDayDetail={openDayDetail}
@@ -637,6 +669,7 @@ function Dashboard({
             activeSelectedDayDetail={activeSelectedDayDetail}
             disabledCount={disabledCount}
             enabledCount={enabledCount}
+            horizonDays={horizonDays}
             isExpanded={isUpcomingExpanded || Boolean(activeSelectedDayDetail)}
             onCloseDayDetails={() => setSelectedDayDetail(null)}
             onOpenDay={openSelectedDayDetail}
@@ -654,6 +687,7 @@ function Dashboard({
         <ScheduleTable
           schedules={filteredSchedules}
           className="inventory-view"
+          horizonDays={horizonDays}
           robotNames={robotNames}
           machineNames={machineNames}
           scheduleMachineIds={effectiveScheduleMachineIds}

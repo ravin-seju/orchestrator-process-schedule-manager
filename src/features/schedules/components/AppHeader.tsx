@@ -13,8 +13,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { APP_VERSION } from '@/whatsNew'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { formatNumber } from '../formatters'
-import { iconSize } from '../constants'
+import { defaultLifecycleHorizonDays, iconSize, lifecycleHorizonOptions } from '../constants'
 import type { TenantOption } from '../types'
 import type { SummaryMetricKey } from '../summaryMetrics'
 import type { SummaryMetric } from './SummaryBand'
@@ -47,10 +48,12 @@ export function AppHeader({
   connectionTitle,
   environmentDisplayLabel,
   headerFilterChips,
+  horizonDays,
   isLoading,
   isRevalidating,
   metrics,
   nextThemeLabel,
+  onHorizonChange,
   onManageConnection,
   onMetricClick,
   onTenantChange,
@@ -68,10 +71,12 @@ export function AppHeader({
   connectionTitle: string
   environmentDisplayLabel: string
   headerFilterChips: HeaderFilterChip[]
+  horizonDays?: number
   isLoading: boolean
   isRevalidating?: boolean
   metrics?: SummaryMetric[]
   nextThemeLabel: string
+  onHorizonChange?: (days: number) => void
   onManageConnection?: () => void
   onMetricClick?: (key: SummaryMetricKey) => void
   onTenantChange: (tenantName: string) => void
@@ -239,8 +244,10 @@ export function AppHeader({
                 </div>
               ))}
             </div>
-            {showActions ? (
-              <div className="header-metric-actions" role="group" aria-label="Trigger issues">
+            {showActions || onHorizonChange ? (
+              <div className="header-metric-actions">
+                {showActions ? (
+                <div className="header-alert-chips" role="group" aria-label="Trigger issues">
                 {issuesPresent.length === 0 ? (
                   <span
                     className="header-alert-chip is-clear"
@@ -272,6 +279,37 @@ export function AppHeader({
                     )
                   })
                 )}
+                </div>
+                ) : null}
+                {/* Deliberately outside the chip block above: that block collapses to a single
+                    "All clear" pill when no metric has a non-zero value, so a horizon control
+                    nested inside it would disappear in exactly the case you need it — zero
+                    triggers expiring in 14 days, and no way to widen the window to find the ones
+                    ending in six months. Gated on its own handler, not on showActions, which also
+                    depends on onMetricClick. */}
+                {onHorizonChange ? (
+                  <div className="header-horizon">
+                    <span className="header-horizon-label" aria-hidden="true">
+                      Expiring within
+                    </span>
+                    <ToggleGroup
+                      aria-label="Expiring within"
+                      onValueChange={(value) => {
+                        // Radix emits '' when the active item is pressed again. There is no
+                        // "no horizon" state, so ignore it rather than clearing the window.
+                        if (value) onHorizonChange(Number(value))
+                      }}
+                      type="single"
+                      value={String(horizonDays ?? defaultLifecycleHorizonDays)}
+                    >
+                      {lifecycleHorizonOptions.map((option) => (
+                        <ToggleGroupItem key={option.days} value={String(option.days)}>
+                          {option.label}
+                        </ToggleGroupItem>
+                      ))}
+                    </ToggleGroup>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>

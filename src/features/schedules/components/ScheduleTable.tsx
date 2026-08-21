@@ -11,7 +11,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { recurrenceBucketLabels } from '../constants'
+import { defaultLifecycleHorizonDays, recurrenceBucketLabels } from '../constants'
 import { formatNumber } from '../formatters'
 import type { ProcessSchedule } from '../orchestrator'
 import {
@@ -23,17 +23,21 @@ import {
   lifecycleEndLabel,
   resolveMachineNames,
   resolveRobotNames,
+  scheduleStopDate,
+  stopDateLabel,
 } from '../scheduleUtils'
 
 const inventoryRowHeight = 36
+// The colSpan of the virtual-scroll spacer rows — must equal the real column count, or the
+// spacers span too few columns and the virtualized layout skews once the list passes 80 rows.
+const inventoryColumnCount = 10
 const inventoryOverscan = 8
-const inventoryColumnCount = 9
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
-// Number + status + type (fixed-ish) plus the two fixed-percent Machine/Robot columns;
+// Number + status + type (fixed-ish) plus the fixed-percent Machine/Robot/Ends columns;
 // the remainder is shared by the text-weighted name/process/folder/pattern columns.
-// Keep this in step with the fixed --inventory-*-width values below (2.4 + 9.5 + 10.5 + 11 + 9),
+// Keep this in step with the fixed --inventory-*-width values below (2.4 + 9.5 + 10.5 + 11 + 9 + 9),
 // or the dynamic columns are handed more space than is left and the row overflows.
-const reservedColumnPercent = 42.4
+const reservedColumnPercent = 51.4
 const textWidth = (value: string | null | undefined, min: number, max: number) =>
   clamp((value?.length ?? 0) * 7.6 + 34, min, max)
 
@@ -45,12 +49,14 @@ const toPercent = (value: number) => `${value.toFixed(2)}%`
 export function ScheduleTable({
   schedules,
   className = '',
+  horizonDays = defaultLifecycleHorizonDays,
   robotNames,
   machineNames,
   scheduleMachineIds,
 }: {
   schedules: ProcessSchedule[]
   className?: string
+  horizonDays?: number
   robotNames?: Map<number, string>
   machineNames?: Map<number, string>
   scheduleMachineIds?: Map<number, number[]>
@@ -122,6 +128,11 @@ export function ScheduleTable({
 
     return {
       style: {
+        // A plain percentage, NOT a clamp. table-layout is fixed, so a px floor that exceeds its
+        // own percentage at narrow widths over-subscribes the table past 100% and the browser
+        // shrinks every column to compensate — clamp(84px, 7%, 104px) measured 46px at 980px wide.
+        // 9% is 88px there, and "Aug 24, 2026" needs 85px including padding at --font-xs.
+        '--inventory-ends-width': '9%',
         '--inventory-folder-width': widthFor(folderWeight),
         '--inventory-machine-width': '11%',
         '--inventory-name-width': widthFor(nameWeight),
@@ -176,6 +187,7 @@ export function ScheduleTable({
             <col className="robot-column" />
             <col className="type-column" />
             <col className="pattern-column" />
+            <col className="ends-column" />
             <col className="status-column" />
           </colgroup>
           <thead>
@@ -188,6 +200,7 @@ export function ScheduleTable({
               <th>Robot</th>
               <th>Trigger Type</th>
               <th>Pattern</th>
+              <th>Ends</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -205,11 +218,11 @@ export function ScheduleTable({
               const isQueue = isQueueTrigger(schedule)
               const patternLabel = isQueue ? '—' : getScheduleSummary(schedule)
               const patternTitle = isQueue ? 'Queue-driven trigger — no time-based pattern' : patternLabel
-              const lifecycleStatus = getLifecycleStatus(schedule)
-              const lifecycleStopDate =
-                isLifecycleAttention(lifecycleStatus) && schedule.StopProcessDate
-                  ? new Date(schedule.StopProcessDate)
-                  : null
+              const lifecycleStatus = getLifecycleStatus(schedule, undefined, horizonDays)
+              // Every stop date gets a marker now; the horizon only decides whether it is the
+              // amber "act soon" one or the muted "exists, not yet" one.
+              const lifecycleStopDate = scheduleStopDate(schedule)
+              const isSoon = isLifecycleAttention(lifecycleStatus)
 
               return (
                 <tr key={`${schedule.folderId}-${schedule.Id}`} style={folderAccentStyle(schedule.folderName)}>
@@ -253,7 +266,7 @@ export function ScheduleTable({
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span
-                              className={`lifecycle-badge lifecycle-${lifecycleStatus}`}
+                              className={`lifecycle-badge lifecycle-${lifecycleStatus}${isSoon ? '' : ' is-later'}`}
                               role="img"
                               aria-label={lifecycleEndLabel(schedule, lifecycleStopDate)}
                             >
@@ -270,6 +283,9 @@ export function ScheduleTable({
                         <TooltipContent>{patternTitle}</TooltipContent>
                       </Tooltip>
                     </span>
+                  </td>
+                  <td className={`table-ends${isSoon ? ' is-soon' : ''}`}>
+                    {lifecycleStopDate ? stopDateLabel(schedule, lifecycleStopDate) : '—'}
                   </td>
                   <td>
                     {isAutoDisabledByStopDate(schedule) ? (

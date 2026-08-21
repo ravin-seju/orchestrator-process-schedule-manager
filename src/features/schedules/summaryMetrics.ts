@@ -1,7 +1,7 @@
 import {
   countScheduleRunsInRange,
 } from './calendarDisplay'
-import { EXPIRING_SOON_DAYS } from './constants'
+import { defaultLifecycleHorizonDays, lifecycleHorizonLabel } from './constants'
 import type { ProcessSchedule } from './orchestrator'
 import { getAssignedMachineIds, getAssignedRobotIds, getCachedScheduleOccurrences, getLifecycleStatus, isLifecycleAttention, isQueueTrigger, isStaleSchedule } from './scheduleUtils'
 import type { StatusFilter } from './types'
@@ -46,7 +46,9 @@ const metricDescriptions: Record<SummaryMetricKey, string> = {
   collisions: 'Enabled triggers scheduled to fire at the exact same minute as another trigger over the next 7 days.',
   duplicateSchedules: 'Processes with more than one trigger configured in the same folder. These may need review.',
   enabled: 'Visible triggers that are currently enabled.',
-  expiring: `Triggers with a scheduled stop date that has already passed or falls within the next ${EXPIRING_SOON_DAYS} days.`,
+  // Placeholder only — the live copy comes from expiringDescription(), which names the selected
+  // horizon so the tooltip and the header toggle can never disagree.
+  expiring: 'Triggers with a scheduled stop date that has already passed or falls within the selected window.',
   folders: 'Folders represented by the visible triggers.',
   machines: 'Distinct machines that have run the visible triggers.',
   robots: 'Distinct robots assigned to the visible triggers.',
@@ -97,11 +99,15 @@ const countStale = (schedules: ProcessSchedule[]): number => {
   return count
 }
 
-const countExpiring = (schedules: ProcessSchedule[]): number => {
+// Reads the selected horizon rather than a constant, so the tooltip always matches the toggle.
+export const expiringDescription = (horizonDays: number) =>
+  `Triggers with a scheduled stop date that has already passed or falls within the next ${lifecycleHorizonLabel(horizonDays)}.`
+
+const countExpiring = (schedules: ProcessSchedule[], horizonDays: number): number => {
   const now = Date.now()
   let count = 0
   for (const s of schedules) {
-    if (isLifecycleAttention(getLifecycleStatus(s, now))) count += 1
+    if (isLifecycleAttention(getLifecycleStatus(s, now, horizonDays))) count += 1
   }
   return count
 }
@@ -169,6 +175,7 @@ const countCollisions = (
 const COLLISION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 export function buildSummaryMetricData({
+  horizonDays = defaultLifecycleHorizonDays,
   schedules,
   scheduleMachineIds,
   collisionMachineIds,
@@ -178,6 +185,7 @@ export function buildSummaryMetricData({
   todayEnd,
   todayStart,
 }: {
+  horizonDays?: number
   schedules: ProcessSchedule[]
   scheduleMachineIds?: Map<number, number[]>
   collisionMachineIds?: Map<number, number[]>
@@ -196,7 +204,7 @@ export function buildSummaryMetricData({
   const collisionWindowEnd = new Date(todayStart.getTime() + COLLISION_WINDOW_MS)
   const staleCount = countStale(schedules)
   const collisionCount = countCollisions(schedules, todayStart, collisionWindowEnd, machineScope, robotScope, collisionMachineIds ?? scheduleMachineIds)
-  const expiringCount = countExpiring(schedules)
+  const expiringCount = countExpiring(schedules, horizonDays)
 
   // Machine/robot metrics surface when the runtime machine map is present. Counts are
   // filter-aware: they derive from the visible `schedules`, exactly like the folders metric.
@@ -252,7 +260,7 @@ export function buildSummaryMetricData({
       value: collisionCount,
     },
     {
-      description: metricDescriptions.expiring,
+      description: expiringDescription(horizonDays),
       key: 'expiring',
       label: 'Expiring',
       tone: metricTones.expiring,

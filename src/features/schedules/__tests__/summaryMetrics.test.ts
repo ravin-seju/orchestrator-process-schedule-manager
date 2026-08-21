@@ -27,10 +27,15 @@ const dayRange = (date: Date) => {
   return { start, end }
 }
 
-const metricValues = (schedules: ProcessSchedule[], statusFilter: 'all' | 'enabled' | 'disabled') => {
+const metricValues = (
+  schedules: ProcessSchedule[],
+  statusFilter: 'all' | 'enabled' | 'disabled',
+  horizonDays?: number,
+) => {
   const { start, end } = dayRange(new Date(2026, 4, 6))
   return Object.fromEntries(
     buildSummaryMetricData({
+      horizonDays,
       schedules,
       statusFilter,
       todayEnd: end,
@@ -194,6 +199,40 @@ describe('summary metric derivation', () => {
 
     const result = metricValues([expired, expiringSoon, farOut], 'enabled')
     expect(result.Expiring).toBe(2)
+  })
+
+  it('counts more triggers as the horizon widens', () => {
+    const in90Days = baseSchedule({
+      Id: 60,
+      StopProcessDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      folderId: 600,
+    })
+    const in2Years = baseSchedule({
+      Id: 61,
+      StopProcessDate: new Date(Date.now() + 730 * 24 * 60 * 60 * 1000).toISOString(),
+      folderId: 600,
+    })
+    const schedules = [in90Days, in2Years]
+
+    expect(metricValues(schedules, 'enabled', 14).Expiring).toBe(0)
+    expect(metricValues(schedules, 'enabled', 90).Expiring).toBe(1)
+    expect(metricValues(schedules, 'enabled', 365).Expiring).toBe(1)
+  })
+
+  it('names the active horizon in the Expiring description, so tooltip and toggle agree', () => {
+    const { start, end } = dayRange(new Date(2026, 4, 6))
+    const descriptionFor = (horizonDays: number) =>
+      buildSummaryMetricData({
+        horizonDays,
+        schedules: [],
+        statusFilter: 'enabled',
+        todayEnd: end,
+        todayStart: start,
+      }).find((metric) => metric.key === 'expiring')?.description
+
+    expect(descriptionFor(14)).toContain('14d')
+    expect(descriptionFor(365)).toContain('1y')
+    expect(descriptionFor(14)).not.toContain('1y')
   })
 })
 

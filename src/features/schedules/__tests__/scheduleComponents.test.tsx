@@ -12,6 +12,7 @@ import {
   getYearMonths,
   scheduleKey,
 } from '../calendarDisplay'
+import { AppHeader } from '../components/AppHeader'
 import { CalendarWorkbench } from '../components/CalendarWorkbench'
 import { FilterToolbar } from '../components/FilterToolbar'
 import { ScheduleTable } from '../components/ScheduleTable'
@@ -32,6 +33,7 @@ import {
   monthLabel,
   sortOccurrences,
 } from '../scheduleUtils'
+import type { SummaryMetricKey } from '../summaryMetrics'
 import type { CalendarViewMode, ViewMode } from '../types'
 
 // Components under test now render Radix tooltips, which throw without a
@@ -40,6 +42,46 @@ import type { CalendarViewMode, ViewMode } from '../types'
 // renders no DOM, so container/baseElement assertions are unaffected.
 const render = (ui: ReactElement, options?: Parameters<typeof baseRender>[1]) =>
   baseRender(ui, { wrapper: TooltipProvider, ...options })
+
+// AppHeader takes a wide required-prop surface that none of these assertions care about; only the
+// metric values and the two handlers vary, so everything else is fixed here.
+const renderHeader = ({
+  expiringCount,
+  horizonDays,
+  onHorizonChange,
+  onMetricClick = () => {},
+}: {
+  expiringCount: number
+  horizonDays?: number
+  onHorizonChange?: (days: number) => void
+  onMetricClick?: ((key: SummaryMetricKey) => void) | undefined
+}) =>
+  render(
+    <AppHeader
+      activeTenantName="Demo"
+      connectionLabel="Connected"
+      connectionState="connected"
+      connectionTitle="Connected to Demo"
+      environmentDisplayLabel="Cloud"
+      headerFilterChips={[]}
+      horizonDays={horizonDays}
+      isLoading={false}
+      metrics={[
+        { icon: null, key: 'triggers', label: 'Triggers', tone: 'var(--teal)', value: 10 },
+        { icon: null, key: 'expiring', label: 'Expiring', tone: 'var(--warning)', value: expiringCount },
+      ]}
+      nextThemeLabel="Dark"
+      onHorizonChange={onHorizonChange}
+      onMetricClick={onMetricClick}
+      onTenantChange={() => {}}
+      refresh={() => {}}
+      resolvedTheme="light"
+      selectedStressCount={null}
+      selectedTenant="Demo"
+      setThemeMode={() => {}}
+      tenantOptions={[]}
+    />,
+  )
 
 if (!Element.prototype.hasPointerCapture) {
   Element.prototype.hasPointerCapture = () => false
@@ -1248,13 +1290,15 @@ describe('CalendarWorkbench component', () => {
 
   // The marker-equals-Expiring-metric invariant: a stop date beyond EXPIRING_SOON_DAYS is
   // informational ('ending') and must not render a marker on any calendar surface.
-  it('renders no lifecycle dot on span bars for a far-future stop date', () => {
+  it('renders a gray, non-urgent lifecycle dot on span bars for a far-future stop date', () => {
     const { container } = renderCalendarWorkbench({
       overrides: { spanBars: spanBarsForStopDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()) },
     })
 
     expect(container.querySelector('.calendar-span-bar')).not.toBeNull()
-    expect(container.querySelector('.lifecycle-dot')).toBeNull()
+    // Beyond the horizon the dot still renders, but as .is-later — gray and unanimated. Only what
+    // the Expiring metric counts gets the amber treatment.
+    expect(container.querySelector('.lifecycle-dot')).toHaveClass('is-later')
   })
 
   const renderWeekForStopDate = (stopProcessDate: string) => {
@@ -1289,11 +1333,11 @@ describe('CalendarWorkbench component', () => {
     expect(container.querySelector('.lifecycle-dot.lifecycle-expiring-soon')).not.toBeNull()
   })
 
-  it('renders no lifecycle dot on Outlook Week timed events for a far-future stop date', () => {
+  it('renders a gray lifecycle dot on Outlook Week timed events for a far-future stop date', () => {
     const { container } = renderWeekForStopDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())
 
     expect(container.querySelector('.outlook-week-event')).not.toBeNull()
-    expect(container.querySelector('.lifecycle-dot')).toBeNull()
+    expect(container.querySelector('.lifecycle-dot')).toHaveClass('is-later')
   })
 })
 
@@ -1567,10 +1611,10 @@ describe('UpcomingPanel component', () => {
     expect(screen.getByText(/^Ended on /)).toBeInTheDocument()
   })
 
-  it('renders no lifecycle badge for a far-future stop date but keeps the Ends text line', () => {
+  it('renders a gray lifecycle badge for a far-future stop date and keeps the Ends text line', () => {
     const { container } = renderDayDetailForStopDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())
 
-    expect(container.querySelector('.lifecycle-badge')).toBeNull()
+    expect(container.querySelector('.lifecycle-badge')).toHaveClass('is-later')
     expect(screen.getByText(/^Ends /)).toBeInTheDocument()
   })
 
@@ -1614,7 +1658,7 @@ describe('ScheduleTable component', () => {
 
     const table = screen.getByRole('table')
     const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent)
-    expect(headers).toEqual(['#', 'Name', 'Process', 'Folder', 'Machine', 'Robot', 'Trigger Type', 'Pattern', 'Status'])
+    expect(headers).toEqual(['#', 'Name', 'Process', 'Folder', 'Machine', 'Robot', 'Trigger Type', 'Pattern', 'Ends', 'Status'])
     expect(within(table).getByText('1')).toBeInTheDocument()
     expect(within(table).getByText('2')).toBeInTheDocument()
     expect(within(table).getByText('3')).toBeInTheDocument()
@@ -1672,7 +1716,7 @@ describe('ScheduleTable component', () => {
 
     const table = screen.getByRole('table')
     const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent)
-    expect(headers).toEqual(['#', 'Name', 'Process', 'Folder', 'Machine', 'Robot', 'Trigger Type', 'Pattern', 'Status'])
+    expect(headers).toEqual(['#', 'Name', 'Process', 'Folder', 'Machine', 'Robot', 'Trigger Type', 'Pattern', 'Ends', 'Status'])
 
     // Row 41: 3 machines → first host + "+2"; robot resolved via robotNames → formatRobotDisplayName.
     expect(screen.getByText('HOST-1')).toBeInTheDocument()
@@ -1731,7 +1775,12 @@ describe('ScheduleTable component', () => {
     const table = screen.getByRole('table')
     const percent = (name: string) =>
       Number.parseFloat(table.style.getPropertyValue(`--inventory-${name}-width`))
-    const fixed = 2.4 + percent('status') + percent('type') + percent('machine') + percent('robot')
+    // Ends must stay a plain percentage. A px-floored clamp here over-subscribes the fixed
+    // table layout at narrow widths and the browser shrinks every column (measured 46px at
+    // 980px wide), so the unit matters as much as the number.
+    expect(table.style.getPropertyValue('--inventory-ends-width')).toBe('9%')
+    const fixed =
+      2.4 + percent('ends') + percent('status') + percent('type') + percent('machine') + percent('robot')
     const dynamic = ['name', 'process', 'folder', 'pattern'].reduce((sum, k) => sum + percent(k), 0)
 
     expect(fixed + dynamic).toBeCloseTo(100, 1)
@@ -1785,7 +1834,7 @@ describe('ScheduleTable component', () => {
     expect(container.querySelectorAll('.lifecycle-badge')).toHaveLength(1)
   })
 
-  it('marks only the triggers the Expiring metric counts, not far-future stop dates', () => {
+  it('gives an amber marker only to the triggers the Expiring metric counts, gray to the rest', () => {
     const schedules = [
       baseSchedule({
         Id: 61,
@@ -1797,13 +1846,125 @@ describe('ScheduleTable component', () => {
         Name: 'Ends Far Future Process',
         StopProcessDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
       }),
+      baseSchedule({ Id: 63, Name: 'No Stop Date Process' }),
     ]
 
     const { container } = render(<ScheduleTable schedules={schedules} />)
 
-    // A stop date beyond EXPIRING_SOON_DAYS is informational, not an attention marker — so the
-    // badge's presence stays exactly equal to the Expiring metric's definition.
-    expect(container.querySelectorAll('.lifecycle-badge')).toHaveLength(1)
-    expect(container.querySelector('.lifecycle-badge')).toHaveClass('lifecycle-expiring-soon')
+    // Every stop date gets a marker now, but only what the Expiring metric counts is amber:
+    // .is-later is the gray, non-glowing variant. A trigger with no stop date gets nothing.
+    const badges = Array.from(container.querySelectorAll('.lifecycle-badge'))
+    expect(badges).toHaveLength(2)
+    expect(badges[0]).not.toHaveClass('is-later')
+    expect(badges[0]).toHaveClass('lifecycle-expiring-soon')
+    expect(badges[1]).toHaveClass('is-later')
+    expect(badges[1]).toHaveClass('lifecycle-ending')
+  })
+
+  it('moves the amber/gray boundary with the horizon, marker for marker', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 64,
+        Name: 'Ends In 90 Days',
+        StopProcessDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    ]
+
+    const { container: narrow } = render(<ScheduleTable schedules={schedules} horizonDays={14} />)
+    expect(narrow.querySelector('.lifecycle-badge')).toHaveClass('is-later')
+
+    cleanup()
+
+    const { container: wide } = render(<ScheduleTable schedules={schedules} horizonDays={365} />)
+    expect(wide.querySelector('.lifecycle-badge')).not.toHaveClass('is-later')
+  })
+
+  it('shows every stop date in the Ends column with a year, and an em dash when there is none', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 65,
+        Name: 'Ends In Two Years',
+        StopProcessDate: new Date(Date.UTC(2028, 11, 18, 12, 0)).toISOString(),
+        TimeZoneIana: 'UTC',
+      }),
+      baseSchedule({ Id: 66, Name: 'No Stop Date Process' }),
+    ]
+
+    const { container } = render(<ScheduleTable schedules={schedules} horizonDays={14} />)
+
+    const cells = Array.from(container.querySelectorAll('.table-ends'))
+    expect(cells).toHaveLength(2)
+    // Uncapped and horizon-independent: two years out, and outside the 14-day horizon, it still
+    // renders — with the year, which shortDateLabel would have omitted.
+    expect(cells[0]).toHaveTextContent('2028')
+    expect(cells[0]).toHaveTextContent('Dec')
+    expect(cells[0]).not.toHaveClass('is-soon')
+    expect(cells[1]).toHaveTextContent('—')
+  })
+
+  it('tints the Ends date to match the row marker inside the horizon', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 67,
+        Name: 'Expiring Soon Process',
+        StopProcessDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    ]
+
+    const { container } = render(<ScheduleTable schedules={schedules} />)
+
+    expect(container.querySelector('.table-ends')).toHaveClass('is-soon')
+  })
+
+  it('renders the horizon toggle in the header, even with nothing expiring', () => {
+    // The regression that decided this control's placement. The alert-chip block collapses to a
+    // single "All clear" pill when every actionable metric is zero — a horizon toggle nested
+    // inside it would vanish in exactly the case you need it: nothing expiring in 14 days, and no
+    // way to widen the window to find what ends in six months.
+    renderHeader({ expiringCount: 0, onHorizonChange: () => {} })
+
+    expect(screen.getByText('All clear')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Expiring within' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '1y' })).toBeInTheDocument()
+  })
+
+  it('gates the horizon toggle on its own handler, not on metric clicks', () => {
+    // showActions also depends on onMetricClick, so binding the toggle to it would drop the
+    // control in any composition that omits metric clicks.
+    renderHeader({ expiringCount: 2, onHorizonChange: () => {}, onMetricClick: undefined })
+
+    expect(screen.getByRole('group', { name: 'Expiring within' })).toBeInTheDocument()
+  })
+
+  it('omits the horizon toggle entirely when no handler is supplied', () => {
+    renderHeader({ expiringCount: 2, onHorizonChange: undefined })
+
+    expect(screen.queryByRole('group', { name: 'Expiring within' })).not.toBeInTheDocument()
+  })
+
+  it('reports the selected horizon in days when a segment is pressed', () => {
+    const onHorizonChange = vi.fn()
+    renderHeader({ expiringCount: 2, onHorizonChange })
+
+    fireEvent.click(screen.getByRole('radio', { name: '90d' }))
+    expect(onHorizonChange).toHaveBeenCalledWith(90)
+
+    // Radix emits '' when the active segment is pressed again; there is no "no horizon" state,
+    // so that must not reach the handler.
+    onHorizonChange.mockClear()
+    fireEvent.click(screen.getByRole('radio', { name: '14d' }))
+    expect(onHorizonChange).not.toHaveBeenCalled()
+  })
+
+  it('keeps one colgroup entry per header cell', () => {
+    // A missing <col> silently drops a column's width variable, so the column falls back to auto
+    // and the row layout shifts. Note this does NOT cover inventoryColumnCount (the spacer
+    // colSpan): the virtualizer only emits spacers once it has measured a viewport height, and
+    // jsdom has no layout, so those rows never render here.
+    const { container } = render(<ScheduleTable schedules={[baseSchedule({ Id: 82, Name: 'Col Probe' })]} />)
+
+    expect(container.querySelectorAll('colgroup col')).toHaveLength(
+      container.querySelectorAll('thead th').length,
+    )
   })
 })

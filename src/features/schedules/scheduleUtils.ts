@@ -86,6 +86,11 @@ export const monthLabel = (date: Date) =>
 export const shortDateLabel = (date: Date, timeZone?: string | null) =>
   getFormatter({ day: 'numeric', month: 'short' }, timeZone).format(date)
 
+// Carries the year, unlike shortDateLabel: a stop date is uncapped, so "18 Dec" cannot say which
+// December once a trigger ends more than a year out.
+export const yearDateLabel = (date: Date, timeZone?: string | null) =>
+  getFormatter({ day: 'numeric', month: 'short', year: 'numeric' }, timeZone).format(date)
+
 // Zone-aware, and it names the zone: StopProcessDate is an absolute instant, so rendering it in the
 // viewer's zone under a "Time zone: <schedule zone>" line could show a different calendar day than
 // the one Orchestrator enforces.
@@ -629,17 +634,34 @@ export type LifecycleStatus = 'expired' | 'expiring-soon' | 'ending'
 
 // StopProcessDate is an absolute trigger-disable date independent of cron cadence — it applies to
 // queue triggers too, unlike the isQueueTrigger-gated cron logic elsewhere in this file.
+//
+// horizonDays moves only the 'expiring-soon' / 'ending' boundary. 'expired' is horizon-invariant,
+// which is why isAutoDisabledByStopDate and lifecycleEndLabel below never need to pass it.
 export const getLifecycleStatus = (
   schedule: ProcessSchedule,
   nowMs: number = Date.now(),
+  horizonDays: number = EXPIRING_SOON_DAYS,
 ): LifecycleStatus | null => {
   if (!schedule.StopProcessDate) return null
   const stopMs = new Date(schedule.StopProcessDate).getTime()
   if (Number.isNaN(stopMs)) return null
   if (stopMs < nowMs) return 'expired'
-  if (stopMs - nowMs <= EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000) return 'expiring-soon'
+  if (stopMs - nowMs <= horizonDays * 24 * 60 * 60 * 1000) return 'expiring-soon'
   return 'ending'
 }
+
+// The stop date as a Date, for callers that render it — null when absent or unparseable, so they
+// cannot construct an Invalid Date from a bad string.
+export const scheduleStopDate = (schedule: ProcessSchedule): Date | null => {
+  if (!schedule.StopProcessDate) return null
+  const stopMs = new Date(schedule.StopProcessDate).getTime()
+
+  return Number.isNaN(stopMs) ? null : new Date(stopMs)
+}
+
+// The inventory "Ends" cell: uncapped and horizon-independent, in the schedule's own timezone.
+export const stopDateLabel = (schedule: ProcessSchedule, date: Date) =>
+  yearDateLabel(date, scheduleTimeZone(schedule))
 
 // The Expiring metric, the 'expiring' attention filter, and every lifecycle marker in the UI all
 // gate on this, so "a marker is showing" always means exactly "counted by the Expiring metric".

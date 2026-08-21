@@ -10,7 +10,7 @@ import {
   buildDensitySegments,
   groupAccentStyle,
 } from '../calendarDisplay'
-import { getLifecycleStatus, isLifecycleAttention, lifecycleEndLabel } from '../scheduleUtils'
+import { getLifecycleStatus, isLifecycleAttention, lifecycleEndLabel, scheduleStopDate } from '../scheduleUtils'
 import type { ScheduleOccurrence } from '../scheduleUtils'
 import type { CalendarSpanBar, ProcessDayGroup, ViewMode } from '../types'
 
@@ -39,20 +39,20 @@ export const ProcessTimelineRow = memo(function ProcessTimelineRow({
   onOpen,
   viewMode,
   compact = false,
+  horizonDays,
 }: {
   item: ProcessDayGroup
   onOpen: (item: ProcessDayGroup) => void
   viewMode: ViewMode
   compact?: boolean
+  horizonDays?: number
 }) {
   const timingLabel = item.runCount > 1 ? formatRunCount(item.runCount) : item.firstOccurrence.timeLabel
   const title = `${item.schedule.Name} · ${item.patternLabel} · ${timingLabel}`
   const rowModeClass = `mode-${viewMode}`
-  const lifecycleStatus = getLifecycleStatus(item.schedule)
-  const lifecycleStopDate =
-    isLifecycleAttention(lifecycleStatus) && item.schedule.StopProcessDate
-      ? new Date(item.schedule.StopProcessDate)
-      : null
+  const lifecycleStatus = getLifecycleStatus(item.schedule, undefined, horizonDays)
+  const lifecycleStopDate = scheduleStopDate(item.schedule)
+  const isSoon = isLifecycleAttention(lifecycleStatus)
   const lifecycleSuffix = lifecycleStopDate
     ? ` · ${lifecycleEndLabel(item.schedule, lifecycleStopDate)}`
     : ''
@@ -68,7 +68,10 @@ export const ProcessTimelineRow = memo(function ProcessTimelineRow({
         >
           <span className="process-row-copy">
             {lifecycleStopDate ? (
-              <span className={`lifecycle-dot lifecycle-${lifecycleStatus}`} aria-hidden="true" />
+              <span
+                className={`lifecycle-dot lifecycle-${lifecycleStatus}${isSoon ? '' : ' is-later'}`}
+                aria-hidden="true"
+              />
             ) : null}
             <span className="process-row-title">{item.schedule.Name}</span>
             <span className="process-row-meta">
@@ -86,17 +89,17 @@ export const ProcessTimelineRow = memo(function ProcessTimelineRow({
 export const ProcessSpanBar = memo(function ProcessSpanBar({
   bar,
   onOpen,
+  horizonDays,
 }: {
   bar: CalendarSpanBar
   onOpen: (item: ProcessDayGroup) => void
+  horizonDays?: number
 }) {
   const { item } = bar
   const title = `${item.schedule.Name} · ${item.patternLabel} · ${bar.timingLabel}`
-  const lifecycleStatus = getLifecycleStatus(item.schedule)
-  const lifecycleStopDate =
-    isLifecycleAttention(lifecycleStatus) && item.schedule.StopProcessDate
-      ? new Date(item.schedule.StopProcessDate)
-      : null
+  const lifecycleStatus = getLifecycleStatus(item.schedule, undefined, horizonDays)
+  const lifecycleStopDate = scheduleStopDate(item.schedule)
+  const isSoon = isLifecycleAttention(lifecycleStatus)
   const lifecycleSuffix = lifecycleStopDate
     ? ` · ${lifecycleEndLabel(item.schedule, lifecycleStopDate)}`
     : ''
@@ -120,7 +123,10 @@ export const ProcessSpanBar = memo(function ProcessSpanBar({
         >
           <span className="calendar-span-copy">
             {lifecycleStopDate ? (
-              <span className={`lifecycle-dot lifecycle-${lifecycleStatus}`} aria-hidden="true" />
+              <span
+                className={`lifecycle-dot lifecycle-${lifecycleStatus}${isSoon ? '' : ' is-later'}`}
+                aria-hidden="true"
+              />
             ) : null}
             <span className="calendar-span-title">{item.schedule.Name}</span>
             <span className="calendar-span-meta">{item.bucketLabel}</span>
