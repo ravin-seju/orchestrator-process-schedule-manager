@@ -20,6 +20,7 @@ import {
   resolveRobotNames,
   scheduleStopDate,
   shortDateLabel,
+  stopStrategyLabel,
   timeLabel,
 } from '../scheduleUtils'
 import type { ScheduleOccurrence } from '../scheduleUtils'
@@ -160,14 +161,8 @@ export function DayDetailsPanel({
             const lifecycleStopDate = scheduleStopDate(group.schedule)
             const lifecycleTone = lifecycleMarkerTone(group.schedule, undefined, horizonDays)
             const lifecycleIsSoon = lifecycleTone === 'amber'
-            // Only label a strategy Orchestrator actually reported. StopStrategy is optional, so a
-            // two-way `=== 'Kill'` test would render an unset strategy as a configured "Soft Stop".
-            const stopStrategyLabel =
-              group.schedule.StopStrategy === 'Kill'
-                ? 'Kill'
-                : group.schedule.StopStrategy === 'SoftStop'
-                  ? 'Soft Stop'
-                  : null
+            // Shared with the CSV export — see stopStrategyLabel for the two traps it guards.
+            const strategyLabel = stopStrategyLabel(group.schedule)
 
             return (
               <section
@@ -202,7 +197,7 @@ export function DayDetailsPanel({
                       <p>
                         {lifecycleStatus === 'expired' ? 'Ended on ' : 'Ends '}
                         {shortDateLabel(new Date(group.schedule.StopProcessDate), timeZone)}
-                        {stopStrategyLabel ? ` · ${stopStrategyLabel}` : ''}
+                        {strategyLabel ? ` · ${strategyLabel}` : ''}
                       </p>
                     ) : null}
                     {showRunInfo ? (

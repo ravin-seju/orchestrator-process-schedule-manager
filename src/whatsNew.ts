@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Activity, BellRing, Bot, CalendarClock, Hourglass, LogIn, Palette, ShieldCheck, Wrench } from 'lucide-react'
+import { Activity, BellRing, Bot, CalendarClock, Download, Hourglass, LogIn, Palette, ShieldCheck, Wrench } from 'lucide-react'
 
 // A single "What's New" bullet: an icon plus a short, plain-language description.
 export type WhatsNewItem = {
@@ -33,7 +33,7 @@ export const CHANGELOG: WhatsNewRelease[] = [
             icon: Hourglass,
             title: 'Trigger lifecycle awareness',
             description:
-              'Triggers with an end date in the past or the next two weeks are flagged with an amber hourglass across the calendar and inventory, and a new Expiring metric counts exactly that set.',
+              'Triggers ending within a window you choose — two weeks by default, up to a year — are flagged with an amber hourglass, and a new Expiring metric counts exactly that set. The inventory’s Ends column shows every end date, however far out.',
           },
           {
             icon: BellRing,
@@ -46,6 +46,12 @@ export const CHANGELOG: WhatsNewRelease[] = [
             title: 'No runs shown past an end date',
             description:
               'The calendar, upcoming panel, and the Active Today and Collisions metrics all stop projecting runs a trigger can no longer perform. End dates also render in the trigger’s own timezone.',
+          },
+          {
+            icon: Download,
+            title: 'Export the inventory',
+            description:
+              'Download the inventory as a CSV file that opens in Excel, Numbers or Google Sheets. It holds exactly the triggers your filters show, with dates in a format spreadsheets can sort.',
           },
         ],
       },

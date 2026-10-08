@@ -4188,9 +4188,62 @@ button.year-day {
   justify-self: stretch;
 }
 
+/* Two rows: the optional export strip, then the scroll container. Both children are pinned to an
+   explicit row rather than auto-placed. With auto-placement, a table rendered WITHOUT the strip
+   would drop its only child into the `auto` row, lose the bounded height its overflow-y and the
+   virtualizer's viewport measurement depend on, and stop scrolling. Pinned, the empty first row
+   simply collapses to zero. (The previous single `minmax(0, 1fr)` row broke the other way the
+   moment a second child arrived.) */
 .table-section {
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.table-section > .inventory-export-bar {
+  grid-row: 1;
+}
+
+.table-section > .schedule-table {
+  grid-row: 2;
+}
+
+.inventory-export-bar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 6px 12px;
+}
+
+.inventory-export-count {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* .text-button's 34px floor would make this strip taller than a table row; trim it here only.
+   Scoped to (0,2,0) on purpose: a narrow-viewport media query later in this file sets
+   `.text-button { flex: 1 }` at (0,1,0), and source order alone would let it stretch the button
+   across the strip and squeeze the count text out. The skin overrides only re-round the corners,
+   which is wanted. */
+.inventory-export-bar .inventory-export-button {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: var(--font-sm);
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+.inventory-export-bar .inventory-export-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .section-heading {

@@ -11,10 +11,15 @@ import {
   getScheduleOccurrences,
   isAutoDisabledByStopDate,
   isLifecycleAttention,
+  isoDateInZone,
+  isoDateTimeInZone,
   isStaleSchedule,
   lifecycleEndLabel,
+  patternLabel,
+  processLabel,
   scheduleStopDate,
   stopDateLabel,
+  stopStrategyLabel,
 } from '../scheduleUtils'
 import { EXPIRING_SOON_DAYS, lifecycleHorizonOptions } from '../constants'
 import type { ProcessSchedule } from '../orchestrator'
@@ -478,5 +483,63 @@ describe('fullDateTimeLabel', () => {
 
   it('names the zone so the instant is unambiguous', () => {
     expect(fullDateTimeLabel(new Date('2026-09-01T04:30:00.000Z'), 'Asia/Tokyo')).toMatch(/GMT\+9|JST/)
+  })
+})
+
+describe('shared inventory labels', () => {
+  it('processLabel falls back from release to package to "Unknown"', () => {
+    expect(processLabel(makeSchedule(1, { ReleaseName: 'Release.A', PackageName: 'Pkg.A' }))).toBe('Release.A')
+    expect(processLabel(makeSchedule(2, { ReleaseName: null, PackageName: 'Pkg.B' }))).toBe('Pkg.B')
+    expect(processLabel(makeSchedule(3, { ReleaseName: null, PackageName: null }))).toBe('Unknown')
+  })
+
+  it('patternLabel is null for a queue trigger, so each caller chooses how to show "none"', () => {
+    expect(patternLabel(makeSchedule(1, { QueueDefinitionId: 9001, StartProcessCronSummary: 'Every minute' }))).toBeNull()
+    expect(patternLabel(makeSchedule(2, { StartProcessCronSummary: 'At 10:00 AM' }))).toBe('At 10:00 AM')
+  })
+})
+
+describe('stopStrategyLabel', () => {
+  const stop = new Date(2026, 8, 30).toISOString()
+
+  it('is null without a stop date — Orchestrator defaults StopStrategy to "SoftStop" regardless', () => {
+    expect(stopStrategyLabel(makeSchedule(1, { StopStrategy: 'SoftStop' }))).toBeNull()
+    expect(stopStrategyLabel(makeSchedule(2, { StopStrategy: 'Kill' }))).toBeNull()
+  })
+
+  it('names the configured strategy once a stop date exists', () => {
+    expect(stopStrategyLabel(makeSchedule(1, { StopProcessDate: stop, StopStrategy: 'Kill' }))).toBe('Kill')
+    expect(stopStrategyLabel(makeSchedule(2, { StopProcessDate: stop, StopStrategy: 'SoftStop' }))).toBe('Soft Stop')
+  })
+
+  it('is null for an unset strategy rather than implying Soft Stop', () => {
+    expect(stopStrategyLabel(makeSchedule(1, { StopProcessDate: stop }))).toBeNull()
+  })
+})
+
+describe('isoDateInZone / isoDateTimeInZone', () => {
+  it('assembles YYYY-MM-DD and YYYY-MM-DD HH:mm in the given zone', () => {
+    const instant = new Date(Date.UTC(2026, 7, 24, 19, 30))
+    expect(isoDateInZone(instant, 'America/Chicago')).toBe('2026-08-24')
+    expect(isoDateTimeInZone(instant, 'America/Chicago')).toBe('2026-08-24 14:30')
+  })
+
+  it('crosses the date line correctly — same instant, different calendar day', () => {
+    const instant = new Date(Date.UTC(2026, 7, 24, 3, 30))
+    expect(isoDateInZone(instant, 'America/Chicago')).toBe('2026-08-23')
+    expect(isoDateInZone(instant, 'Asia/Tokyo')).toBe('2026-08-24')
+  })
+
+  it('renders midnight as 00, never 24', () => {
+    // 05:05 UTC is 00:05 in Chicago during daylight time. Without hourCycle h23, some engines
+    // format this hour as "24" when hour12 is off.
+    expect(isoDateTimeInZone(new Date(Date.UTC(2026, 7, 24, 5, 5)), 'America/Chicago')).toBe('2026-08-24 00:05')
+  })
+
+  it('falls back to the viewer zone instead of throwing for a name Intl rejects', () => {
+    const instant = new Date(Date.UTC(2026, 7, 24, 12, 0))
+    // Windows names live in TimeZoneId; Intl only accepts IANA.
+    expect(isoDateInZone(instant, 'Central Standard Time')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(isoDateTimeInZone(instant, 'Not/AZone')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
   })
 })

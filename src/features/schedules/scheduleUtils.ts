@@ -54,19 +54,22 @@ const getTimeFormatter = (timeZone: string | null | undefined): Intl.DateTimeFor
 // viewer's rather than throwing.
 const dateFormatterCache = new Map<string, Intl.DateTimeFormat>()
 
+// `locale` is left undefined (the viewer's) for everything a person reads; it is pinned only where a
+// machine reads the result — see isoParts.
 const getFormatter = (
   options: Intl.DateTimeFormatOptions,
   timeZone: string | null | undefined,
+  locale?: string,
 ): Intl.DateTimeFormat => {
-  const key = `${JSON.stringify(options)}|${timeZone ?? ''}`
+  const key = `${locale ?? ''}|${JSON.stringify(options)}|${timeZone ?? ''}`
   const cached = dateFormatterCache.get(key)
   if (cached) return cached
 
   let formatter: Intl.DateTimeFormat
   try {
-    formatter = new Intl.DateTimeFormat(undefined, timeZone ? { ...options, timeZone } : options)
+    formatter = new Intl.DateTimeFormat(locale, timeZone ? { ...options, timeZone } : options)
   } catch {
-    formatter = new Intl.DateTimeFormat(undefined, options)
+    formatter = new Intl.DateTimeFormat(locale, options)
   }
   dateFormatterCache.set(key, formatter)
 
@@ -110,6 +113,33 @@ export const fullDateTimeLabel = (date: Date, timeZone?: string | null) =>
 
 export const scheduleTimeZone = (schedule: ProcessSchedule) =>
   schedule.TimeZoneIana ?? schedule.TimeZoneId
+
+// Sortable ISO forms, for files rather than people. Assembled by hand from formatToParts instead of
+// read off some locale's display order, so the result is YYYY-MM-DD no matter what any locale
+// prints. en-US is pinned only so every part comes back in Latin digits; h23 avoids engines that
+// render midnight as "24". The zone falls back to the viewer's for an unknown name, exactly like
+// the labels above — including Windows TimeZoneId values such as "Central Standard Time".
+const isoParts = (date: Date, timeZone: string | null | undefined, withTime: boolean) => {
+  const options: Intl.DateTimeFormatOptions = withTime
+    ? { day: '2-digit', hour: '2-digit', hourCycle: 'h23', minute: '2-digit', month: '2-digit', year: 'numeric' }
+    : { day: '2-digit', month: '2-digit', year: 'numeric' }
+  const parts = getFormatter(options, timeZone, 'en-US').formatToParts(date)
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? ''
+
+  return { day: part('day'), hour: part('hour'), minute: part('minute'), month: part('month'), year: part('year') }
+}
+
+export const isoDateInZone = (date: Date, timeZone?: string | null) => {
+  const { day, month, year } = isoParts(date, timeZone, false)
+
+  return `${year}-${month}-${day}`
+}
+
+export const isoDateTimeInZone = (date: Date, timeZone?: string | null) => {
+  const { day, hour, minute, month, year } = isoParts(date, timeZone, true)
+
+  return `${year}-${month}-${day} ${hour}:${minute}`
+}
 
 export const timeLabel = (date: Date, timeZone?: string | null) =>
   getTimeFormatter(timeZone).format(date)
@@ -396,6 +426,16 @@ export const getScheduleSummary = (schedule: ProcessSchedule) => {
 export const isQueueTrigger = (schedule: ProcessSchedule): boolean =>
   schedule.QueueDefinitionId !== null && schedule.QueueDefinitionId !== undefined
 
+// The next two are shared by the inventory table and the CSV export, so the two can never disagree
+// about what a trigger is called or what pattern it runs on.
+export const processLabel = (schedule: ProcessSchedule) =>
+  schedule.ReleaseName ?? schedule.PackageName ?? 'Unknown'
+
+// null for a queue trigger: its cron is a polling cadence, not a time-based pattern. Each caller
+// decides how to show "none" — the table renders an em dash, the export an empty cell.
+export const patternLabel = (schedule: ProcessSchedule): string | null =>
+  isQueueTrigger(schedule) ? null : getScheduleSummary(schedule)
+
 export const getAssignedMachineIds = (schedule: ProcessSchedule): number[] =>
   schedule.MachineRobots?.map((mr) => mr.MachineId).filter((id): id is number => id != null) ?? []
 
@@ -662,6 +702,18 @@ export const scheduleStopDate = (schedule: ProcessSchedule): Date | null => {
 // The inventory "Ends" cell: uncapped and horizon-independent, in the schedule's own timezone.
 export const stopDateLabel = (schedule: ProcessSchedule, date: Date) =>
   yearDateLabel(date, scheduleTimeZone(schedule))
+
+// A strategy only means something attached to a real stop date. Two traps, both found against a
+// live tenant: Orchestrator returns a default "SoftStop" even when StopProcessDate is null, so
+// reading StopStrategy alone would label every trigger "Soft Stop"; and the field is optional, so
+// a two-way `=== 'Kill'` test would show an unset value as a configured Soft Stop.
+export const stopStrategyLabel = (schedule: ProcessSchedule): 'Kill' | 'Soft Stop' | null => {
+  if (!scheduleStopDate(schedule)) return null
+  if (schedule.StopStrategy === 'Kill') return 'Kill'
+  if (schedule.StopStrategy === 'SoftStop') return 'Soft Stop'
+
+  return null
+}
 
 // True when at least one schedule has a stop date and every one of them is in the past — the test
 // behind the inventory column heading ("Ended" vs "Ends"). Derived from the rows rather than from

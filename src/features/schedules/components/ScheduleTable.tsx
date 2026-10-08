@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Hourglass } from 'lucide-react'
+import { Download, Hourglass } from 'lucide-react'
 import {
   classifyRecurrenceBucket,
   folderAccentStyle,
@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/tooltip'
 import { defaultLifecycleHorizonDays, recurrenceBucketLabels } from '../constants'
 import { formatNumber } from '../formatters'
+import { buildInventoryRows, downloadCsv, inventoryExportFilename, toCsv } from '../inventoryExport'
 import type { ProcessSchedule } from '../orchestrator'
 import {
   everyStopDateIsPast,
@@ -22,6 +23,8 @@ import {
   isQueueTrigger,
   lifecycleEndLabel,
   lifecycleMarkerTone,
+  patternLabel,
+  processLabel,
   resolveMachineNames,
   resolveRobotNames,
   scheduleStopDate,
@@ -50,6 +53,7 @@ const toPercent = (value: number) => `${value.toFixed(2)}%`
 export function ScheduleTable({
   schedules,
   className = '',
+  exportTenantName,
   horizonDays = defaultLifecycleHorizonDays,
   robotNames,
   machineNames,
@@ -57,6 +61,8 @@ export function ScheduleTable({
 }: {
   schedules: ProcessSchedule[]
   className?: string
+  // Supplying it turns on the export strip above the table; it also names the downloaded file.
+  exportTenantName?: string
   horizonDays?: number
   robotNames?: Map<number, string>
   machineNames?: Map<number, string>
@@ -117,7 +123,7 @@ export function ScheduleTable({
     const numberWidth = `clamp(38px, 2.4%, ${clamp(formatNumber(Math.max(1, schedules.length)).length * 8 + 30, 42, 56)}px)`
     const nameWeight = maxTextWidth(schedules.map((schedule) => schedule.Name), 170, 300)
     const processWidth = maxTextWidth(
-      schedules.map((schedule) => schedule.ReleaseName ?? schedule.PackageName ?? 'Unknown'),
+      schedules.map((schedule) => processLabel(schedule)),
       240,
       420,
     )
@@ -151,6 +157,17 @@ export function ScheduleTable({
   // "Ended" once every stop date on screen is already past — the Disabled view's normal state.
   const endsHeading = everyStopDateIsPast(schedules) ? 'Ended' : 'Ends'
 
+  // Built from `schedules` — the already-filtered set — not from the rendered rows, which the
+  // virtualizer limits to a window once the list passes 80. The clock is read inside the click
+  // handler, never during render (react-hooks/purity).
+  const handleExport = useCallback(() => {
+    if (!exportTenantName) return
+    const rows = buildInventoryRows(schedules, { machineNames, robotNames, scheduleMachineIds })
+    downloadCsv(inventoryExportFilename(exportTenantName), toCsv(rows))
+  }, [exportTenantName, machineNames, robotNames, scheduleMachineIds, schedules])
+  const triggerCount = formatNumber(schedules.length)
+  const triggerNoun = schedules.length === 1 ? 'trigger' : 'triggers'
+
   // Machine/Robot cell: first value inline, "+N" overflow badge with the full list on
   // hover; a single value renders plain; no data renders an em dash.
   const resourceCell = (names: string[], cls: string) => {
@@ -180,6 +197,33 @@ export function ScheduleTable({
 
   return (
     <section className={`table-section ${className}`.trim()} aria-label="Triggers">
+      {/* Outside the scroll container, so it stays put while rows scroll. It is a grid row of
+          its own — .table-section's grid-template-rows has to account for it. */}
+      {exportTenantName !== undefined ? (
+        <div className="inventory-export-bar">
+          <span className="inventory-export-count" aria-live="polite">
+            {schedules.length === 0
+              ? 'No triggers match your filters'
+              : `${triggerCount} ${triggerNoun} ${schedules.length === 1 ? 'matches' : 'match'} your filters`}
+          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="text-button inventory-export-button"
+                disabled={schedules.length === 0}
+                onClick={handleExport}
+                type="button"
+              >
+                <Download size={14} aria-hidden="true" />
+                Export CSV
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {`Download the ${triggerCount} ${triggerNoun} in view as a CSV file, with your filters applied`}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      ) : null}
       <div className="schedule-table" onScroll={updateViewport} ref={scrollRef}>
         <table className="inventory-table" style={columnWidths.style}>
           <colgroup>
@@ -218,10 +262,10 @@ export function ScheduleTable({
               const index = visibleRange.startIndex + visibleIndex
               const bucket = classifyRecurrenceBucket(schedule)
               const triggerTypeLabel = recurrenceBucketLabels[bucket]
-              const processLabel = schedule.ReleaseName ?? schedule.PackageName ?? 'Unknown'
+              const processName = processLabel(schedule)
               const isQueue = isQueueTrigger(schedule)
-              const patternLabel = isQueue ? '—' : getScheduleSummary(schedule)
-              const patternTitle = isQueue ? 'Queue-driven trigger — no time-based pattern' : patternLabel
+              const pattern = patternLabel(schedule) ?? '—'
+              const patternTitle = isQueue ? 'Queue-driven trigger — no time-based pattern' : pattern
               const lifecycleStatus = getLifecycleStatus(schedule, undefined, horizonDays)
               const lifecycleStopDate = scheduleStopDate(schedule)
               // null for a disabled trigger — see lifecycleMarkerTone. The Ends date still shows.
@@ -239,9 +283,9 @@ export function ScheduleTable({
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <td className="table-process">{processLabel}</td>
+                      <td className="table-process">{processName}</td>
                     </TooltipTrigger>
-                    <TooltipContent>{processLabel}</TooltipContent>
+                    <TooltipContent>{processName}</TooltipContent>
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -282,7 +326,7 @@ export function ScheduleTable({
                       ) : null}
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className="table-pattern-text">{patternLabel}</span>
+                          <span className="table-pattern-text">{pattern}</span>
                         </TooltipTrigger>
                         <TooltipContent>{patternTitle}</TooltipContent>
                       </Tooltip>

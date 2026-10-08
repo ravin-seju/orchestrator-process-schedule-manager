@@ -687,6 +687,7 @@ function Dashboard({
         <ScheduleTable
           schedules={filteredSchedules}
           className="inventory-view"
+          exportTenantName={activeTenant.displayName}
           horizonDays={horizonDays}
           robotNames={robotNames}
           machineNames={machineNames}

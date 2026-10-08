@@ -2010,4 +2010,76 @@ describe('ScheduleTable component', () => {
       container.querySelectorAll('thead th').length,
     )
   })
+
+  describe('export strip', () => {
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it('renders only when a tenant name is supplied', () => {
+      const schedules = [baseSchedule({ Id: 90, Name: 'Strip Probe' })]
+
+      const { container, unmount } = render(<ScheduleTable schedules={schedules} />)
+      expect(container.querySelector('.inventory-export-bar')).toBeNull()
+      unmount()
+
+      render(<ScheduleTable exportTenantName="Demo" schedules={schedules} />)
+      expect(screen.getByRole('button', { name: 'Export CSV' })).toBeEnabled()
+    })
+
+    it('counts the triggers it will export, singular and plural', () => {
+      const { unmount } = render(
+        <ScheduleTable exportTenantName="Demo" schedules={[baseSchedule({ Id: 91, Name: 'One' })]} />,
+      )
+      expect(screen.getByText('1 trigger matches your filters')).toBeInTheDocument()
+      unmount()
+
+      render(
+        <ScheduleTable
+          exportTenantName="Demo"
+          schedules={[baseSchedule({ Id: 92, Name: 'A' }), baseSchedule({ Id: 93, Name: 'B' })]}
+        />,
+      )
+      expect(screen.getByText('2 triggers match your filters')).toBeInTheDocument()
+    })
+
+    it('says so and disables the button when nothing matches', () => {
+      render(<ScheduleTable exportTenantName="Demo" schedules={[]} />)
+
+      expect(screen.getByText('No triggers match your filters')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Export CSV' })).toBeDisabled()
+    })
+
+    it('downloads every filtered trigger under a tenant-named file', async () => {
+      // jsdom implements neither object URLs nor navigation, so capture what would be downloaded.
+      const blobs: Blob[] = []
+      Object.assign(URL, {
+        createObjectURL: vi.fn((blob: Blob) => {
+          blobs.push(blob)
+          return 'blob:mock'
+        }),
+        revokeObjectURL: vi.fn(),
+      })
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+      // 120 rows: past the 80-row virtualization threshold, so a DOM-scraping export would come
+      // up short. The file must still hold every one.
+      const schedules = Array.from({ length: 120 }, (_, index) =>
+        baseSchedule({ Id: 300 + index, Name: `Bulk ${index}` }),
+      )
+
+      render(<ScheduleTable exportTenantName="Demo Tenant" schedules={schedules} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }))
+
+      const link = click.mock.contexts[0] as HTMLAnchorElement
+      expect(link.download).toMatch(/^process-schedules-demo-tenant-\d{4}-\d{2}-\d{2}\.csv$/)
+
+      const csv = await blobs[0].text()
+      const records = csv.replace(/^\uFEFF/, '').trimEnd().split('\r\n')
+      expect(records[0]).toBe(
+        'Name,Process,Folder,Machine,Robot,Trigger Type,Pattern,Ends,Status,Time zone,Next run,Stop strategy',
+      )
+      expect(records).toHaveLength(121)
+      expect(records[120].startsWith('Bulk 119,')).toBe(true)
+    })
+  })
 })
