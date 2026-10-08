@@ -1475,7 +1475,7 @@ describe('UpcomingPanel component', () => {
         selectedDayOccurrences={occurrences}
         upcomingDisplayGroups={[]}
         runtimeStats={new Map([[group.schedule.Id, { medianSec: 180, p90Sec: 300, sampleSize: 15 }]])}
-        robotNames={new Map([[201, 'rparobot@intuit.com-unattended']])}
+        robotNames={new Map([[201, 'automationbot@example.com-unattended']])}
         machineNames={new Map([[501, 'ROBOT-VM-01']])}
         scheduleMachineIds={new Map([[group.schedule.Id, [501]]])}
       />,
@@ -1484,7 +1484,7 @@ describe('UpcomingPanel component', () => {
     expect(screen.getByText('Time zone: America/Chicago')).toBeInTheDocument()
     expect(screen.getByText('Runtime · based on 15 runs')).toBeInTheDocument()
     expect(screen.getByText('Typical 3m · Worst case (p90) 5m')).toBeInTheDocument()
-    expect(screen.getByText('Robot: rparobot')).toBeInTheDocument()
+    expect(screen.getByText('Robot: automationbot')).toBeInTheDocument()
     expect(screen.getByText('Machine: ROBOT-VM-01')).toBeInTheDocument()
   })
 
@@ -1505,7 +1505,7 @@ describe('UpcomingPanel component', () => {
         selectedDayOccurrences={occurrences}
         upcomingDisplayGroups={[]}
         runtimeStats={new Map([[group.schedule.Id, { medianSec: 180, p90Sec: 300, sampleSize: 15 }]])}
-        robotNames={new Map([[201, 'rparobot@intuit.com-unattended']])}
+        robotNames={new Map([[201, 'automationbot@example.com-unattended']])}
         machineNames={new Map(machineIds.map((id, index) => [id, `HOST-${index + 1}`]))}
         scheduleMachineIds={new Map([[group.schedule.Id, machineIds]])}
       />,
@@ -1703,7 +1703,7 @@ describe('ScheduleTable component', () => {
       [503, 'HOST-3'],
       [504, 'HOST-4'],
     ])
-    const robotNames = new Map<number, string>([[201, 'rparobot@example.com-unattended']])
+    const robotNames = new Map<number, string>([[201, 'automationbot@example.com-unattended']])
 
     render(
       <ScheduleTable
@@ -1721,7 +1721,7 @@ describe('ScheduleTable component', () => {
     // Row 41: 3 machines → first host + "+2"; robot resolved via robotNames → formatRobotDisplayName.
     expect(screen.getByText('HOST-1')).toBeInTheDocument()
     expect(screen.getByText('+2')).toBeInTheDocument()
-    expect(screen.getByText('rparobot')).toBeInTheDocument()
+    expect(screen.getByText('automationbot')).toBeInTheDocument()
     // Full host list lives only in the (portal) tooltip — not inline in the DOM.
     expect(screen.queryByText('HOST-1, HOST-2, HOST-3')).not.toBeInTheDocument()
 

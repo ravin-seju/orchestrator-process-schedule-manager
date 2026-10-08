@@ -117,11 +117,11 @@ describe('FilterToolbar machine picker search', () => {
 
 describe('FilterToolbar robot picker search', () => {
   it('omits the search box for a single-robot tenant', async () => {
-    renderToolbar({ robotOptions: [{ id: 1, name: 'rparobot' }] })
+    renderToolbar({ robotOptions: [{ id: 1, name: 'automationbot' }] })
 
     fireEvent.click(screen.getByRole('button', { name: 'Robot filter' }))
 
-    expect(await screen.findByText('rparobot')).toBeInTheDocument()
+    expect(await screen.findByText('automationbot')).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: 'Search robot options' })).not.toBeInTheDocument()
   })
 
