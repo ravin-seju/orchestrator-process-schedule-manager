@@ -7,7 +7,7 @@ import {
 } from '../calendarDisplay'
 import { formatNumber, formatRunCount } from '../formatters'
 import { weekdayLabels } from '../constants'
-import { timeLabel } from '../scheduleUtils'
+import { getLifecycleStatus, lifecycleEndLabel, lifecycleMarkerTone, scheduleStopDate, timeLabel } from '../scheduleUtils'
 import type { CalendarDisplayItem, OutlookWeekTimedEvent, ProcessDayGroup, RuntimeStats, SelectedDayDetail } from '../types'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
@@ -391,17 +391,26 @@ const buildAllDaySpans = (days: ReturnType<typeof buildOutlookWeekLayout>['days'
 const DenseSummaryChip = memo(function DenseSummaryChip({
   span,
   onOpenDayDetail,
+  horizonDays,
 }: {
   span: OutlookAllDaySpan
   onOpenDayDetail: (item: ProcessDayGroup) => void
+  horizonDays?: number
 }) {
   const title = `${span.item.schedule.Name} - ${span.item.bucketLabel} - ${formatRunCount(span.item.runCount)}/day - ${formatRunCount(span.totalRuns)} total`
+  const lifecycleStatus = getLifecycleStatus(span.item.schedule, undefined, horizonDays)
+  const lifecycleStopDate = scheduleStopDate(span.item.schedule)
+  const markerTone = lifecycleMarkerTone(span.item.schedule, undefined, horizonDays)
+  const isSoon = markerTone === 'amber'
+  const lifecycleSuffix = lifecycleStopDate
+    ? ` · ${lifecycleEndLabel(span.item.schedule, lifecycleStopDate)}`
+    : ''
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
-          aria-label={`Show exact runs for ${title}`}
+          aria-label={`Show exact runs for ${title}${lifecycleSuffix}`}
           className={`outlook-all-day-chip ${span.item.schedule.Enabled ? '' : 'is-disabled'}`}
           onClick={() => onOpenDayDetail(span.item)}
           style={
@@ -415,12 +424,18 @@ const DenseSummaryChip = memo(function DenseSummaryChip({
           type="button"
         >
           <span className="outlook-event-copy">
+            {markerTone ? (
+              <span
+                className={`lifecycle-dot lifecycle-${lifecycleStatus}${isSoon ? '' : ' is-later'}`}
+                aria-hidden="true"
+              />
+            ) : null}
             <span className="outlook-event-title">{span.item.schedule.Name}</span>
             <span className="outlook-event-meta">{span.item.bucketLabel}</span>
           </span>
         </button>
       </TooltipTrigger>
-      <TooltipContent>{`Show exact runs for ${title}`}</TooltipContent>
+      <TooltipContent>{`Show exact runs for ${title}${lifecycleSuffix}`}</TooltipContent>
     </Tooltip>
   )
 })
@@ -428,6 +443,7 @@ const DenseSummaryChip = memo(function DenseSummaryChip({
 export const OutlookWeekView = memo(function OutlookWeekView({
   calendarDays,
   calendarItemsByDay,
+  horizonDays,
   onOpenDayDetail,
   onOpenTimeSlot,
   runtimeStats,
@@ -435,6 +451,7 @@ export const OutlookWeekView = memo(function OutlookWeekView({
 }: {
   calendarDays: Date[]
   calendarItemsByDay: Map<string, CalendarDisplayItem[]>
+  horizonDays?: number
   onOpenDayDetail: (item: ProcessDayGroup) => void
   onOpenTimeSlot: (detail: SelectedDayDetail) => void
   runtimeStats?: Map<number, RuntimeStats>
@@ -563,6 +580,7 @@ export const OutlookWeekView = memo(function OutlookWeekView({
               key={span.id}
               span={span}
               onOpenDayDetail={onOpenDayDetail}
+              horizonDays={horizonDays}
             />
           ))}
           {allDaySpans.length > maxAllDayVisibleBlocks ? (
@@ -662,6 +680,13 @@ export const OutlookWeekView = memo(function OutlookWeekView({
                       const stats = runtimeStats?.get(event.item.schedule.Id)
                       const typMinutes = stats ? Math.max(1, Math.ceil(stats.medianSec / 60)) : null
                       const p90Minutes = stats ? Math.max(1, Math.ceil(stats.p90Sec / 60)) : null
+                      const lifecycleStatus = getLifecycleStatus(event.item.schedule, undefined, horizonDays)
+                      const lifecycleStopDate = scheduleStopDate(event.item.schedule)
+                      const lifecycleTone = lifecycleMarkerTone(event.item.schedule, undefined, horizonDays)
+                      const lifecycleIsSoon = lifecycleTone === 'amber'
+                      const lifecycleSuffix = lifecycleStopDate
+                        ? ` · ${lifecycleEndLabel(event.item.schedule, lifecycleStopDate)}`
+                        : ''
 
                       return (
                         <Tooltip key={event.id}>
@@ -686,10 +711,16 @@ export const OutlookWeekView = memo(function OutlookWeekView({
                                   '--event-height': `${eventHeight}px`,
                                 } as CSSProperties
                               }
-                              aria-label={`Show exact runs for ${title}`}
+                              aria-label={`Show exact runs for ${title}${lifecycleSuffix}`}
                               type="button"
                             >
                               <span className="outlook-event-copy">
+                                {lifecycleTone ? (
+                                  <span
+                                    className={`lifecycle-dot lifecycle-${lifecycleStatus}${lifecycleIsSoon ? '' : ' is-later'}`}
+                                    aria-hidden="true"
+                                  />
+                                ) : null}
                                 <span className="outlook-event-title">{event.item.schedule.Name}</span>
                                 {typMinutes !== null && (
                                   <span className="outlook-event-meta">Typical {typMinutes}m</span>
@@ -708,6 +739,9 @@ export const OutlookWeekView = memo(function OutlookWeekView({
                             ) : (
                               <p>No recent run history</p>
                             )}
+                            {lifecycleStopDate ? (
+                              <p>{lifecycleEndLabel(event.item.schedule, lifecycleStopDate)}</p>
+                            ) : null}
                           </TooltipContent>
                         </Tooltip>
                       )

@@ -27,10 +27,15 @@ const dayRange = (date: Date) => {
   return { start, end }
 }
 
-const metricValues = (schedules: ProcessSchedule[], statusFilter: 'all' | 'enabled' | 'disabled') => {
+const metricValues = (
+  schedules: ProcessSchedule[],
+  statusFilter: 'all' | 'enabled' | 'disabled',
+  horizonDays?: number,
+) => {
   const { start, end } = dayRange(new Date(2026, 4, 6))
   return Object.fromEntries(
     buildSummaryMetricData({
+      horizonDays,
       schedules,
       statusFilter,
       todayEnd: end,
@@ -75,6 +80,7 @@ describe('summary metric derivation', () => {
       Collisions: 2,
       Duplicates: 0,
       Enabled: 2,
+      Expiring: 0,
       Folders: 2,
       Stale: 0,
       Triggers: 4,
@@ -86,6 +92,7 @@ describe('summary metric derivation', () => {
       'Active Today': 2,
       Collisions: 2,
       Duplicates: 0,
+      Expiring: 0,
       Folders: 2,
       Stale: 0,
       Triggers: 2,
@@ -96,6 +103,7 @@ describe('summary metric derivation', () => {
     expect(metricValues([disabledDaily, disabledMinute], 'disabled')).toEqual({
       Collisions: 0,
       Duplicates: 0,
+      Expiring: 0,
       Folders: 2,
       Stale: 0,
       'Suppressed Today': 1_441,
@@ -167,6 +175,75 @@ describe('summary metric derivation', () => {
 
     const result = metricValues([expiredOneShot], 'enabled')
     expect(result.Stale).toBe(1)
+  })
+
+  it('counts a schedule as expiring when its stop date has passed or falls within 14 days', () => {
+    const expired = baseSchedule({
+      Id: 50,
+      Name: 'Past Stop Date',
+      StopProcessDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      folderId: 500,
+    })
+    const expiringSoon = baseSchedule({
+      Id: 51,
+      Name: 'Soon Stop Date',
+      StopProcessDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      folderId: 500,
+    })
+    const farOut = baseSchedule({
+      Id: 52,
+      Name: 'Far Stop Date',
+      StopProcessDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      folderId: 500,
+    })
+
+    const result = metricValues([expired, expiringSoon, farOut], 'enabled')
+    expect(result.Expiring).toBe(2)
+  })
+
+  it('counts more triggers as the horizon widens', () => {
+    const in90Days = baseSchedule({
+      Id: 60,
+      StopProcessDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      folderId: 600,
+    })
+    const in2Years = baseSchedule({
+      Id: 61,
+      StopProcessDate: new Date(Date.now() + 730 * 24 * 60 * 60 * 1000).toISOString(),
+      folderId: 600,
+    })
+    const schedules = [in90Days, in2Years]
+
+    expect(metricValues(schedules, 'enabled', 14).Expiring).toBe(0)
+    expect(metricValues(schedules, 'enabled', 90).Expiring).toBe(1)
+    expect(metricValues(schedules, 'enabled', 365).Expiring).toBe(1)
+  })
+
+  it('excludes disabled triggers from the Expiring count', () => {
+    // The metric counts what draws an amber marker, and a disabled trigger draws none — otherwise
+    // the Disabled view reported "3 expiring triggers" for three that had already stopped.
+    const stop = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+    const enabled = baseSchedule({ Id: 70, StopProcessDate: stop, folderId: 700 })
+    const disabled = baseSchedule({ Id: 71, Enabled: false, StopProcessDate: stop, folderId: 700 })
+
+    expect(metricValues([enabled, disabled], 'all').Expiring).toBe(1)
+    expect(metricValues([disabled], 'disabled').Expiring).toBe(0)
+  })
+
+  it('names the active horizon in the Expiring description, so tooltip and toggle agree', () => {
+    const { start, end } = dayRange(new Date(2026, 4, 6))
+    const descriptionFor = (horizonDays: number) =>
+      buildSummaryMetricData({
+        horizonDays,
+        schedules: [],
+        statusFilter: 'enabled',
+        todayEnd: end,
+        todayStart: start,
+      }).find((metric) => metric.key === 'expiring')?.description
+
+    expect(descriptionFor(14)).toContain('14d')
+    expect(descriptionFor(365)).toContain('1y')
+    expect(descriptionFor(14)).not.toContain('1y')
   })
 })
 

@@ -8,7 +8,6 @@ import {
   getAuthConfigById,
   getAuthConfigGroupById,
   getAvailableAuthConfigs,
-  getMissingRequiredScopes,
   getSelectedAuthConfigId,
   REQUIRED_ORCHESTRATOR_SCOPES,
   resetCustomAuthConfigs,
@@ -76,17 +75,7 @@ const getTokenScopes = (token: string | undefined) => {
   return new Set([...parseScopeClaim(payload?.scope), ...parseScopeClaim(payload?.scp)])
 }
 
-const assertConfiguredRequiredScopes = (configuredScope: string) => {
-  const missingConfiguredScopes = getMissingRequiredScopes(configuredScope)
-  if (missingConfiguredScopes.length) {
-    throw new Error(
-      `Selected connection is missing required scope(s): ${missingConfiguredScopes.join(', ')}.`,
-    )
-  }
-}
-
-const assertRequiredScopes = (token: string | undefined, configuredScope: string) => {
-  assertConfiguredRequiredScopes(configuredScope)
+const assertRequiredScopes = (token: string | undefined) => {
   const tokenScopes = getTokenScopes(token)
   const missingTokenScopes = REQUIRED_ORCHESTRATOR_SCOPES.filter((scope) => !tokenScopes.has(scope))
 
@@ -231,7 +220,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           } finally {
             clearOAuthRedirectQueryString()
           }
-          assertRequiredScopes(authed.getToken(), activeAuthConfig.scope)
+          assertRequiredScopes(authed.getToken())
 
           if (!cancelled) {
             clearSignInAttempt()
@@ -244,7 +233,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         const alreadyAuthenticated = instance.isAuthenticated()
         if (alreadyAuthenticated) {
-          assertRequiredScopes(instance.getToken(), activeAuthConfig.scope)
+          assertRequiredScopes(instance.getToken())
         }
 
         if (!cancelled) {
@@ -288,7 +277,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // so the busy render is never coalesced away; only the catch below clears it, when sign-in
       // fails locally with no redirect.
       setIsAuthenticating(true)
-      assertConfiguredRequiredScopes(activeAuthConfig.scope)
       markSignInAttempt()
       await sdk.initialize()
       // initialize() resolves even when it has scheduled a full-page redirect to UiPath —
@@ -298,7 +286,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // can surface the recovery landing.
       if (sdk.isAuthenticated()) {
         clearSignInAttempt()
-        assertRequiredScopes(sdk.getToken(), activeAuthConfig.scope)
+        assertRequiredScopes(sdk.getToken())
         setIsAuthenticated(true)
       }
     } catch (err) {

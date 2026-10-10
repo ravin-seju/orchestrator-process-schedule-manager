@@ -408,8 +408,8 @@ describe('guided AuthProvider', () => {
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('guest'))
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
-    // The legacy config's scope was healed to the full required set on read, so the pre-login
-    // configured-scope check passes and OAuth proceeds instead of surfacing a missing-scope error.
+    // The legacy config's scope was healed to the full required set on read, so OAuth proceeds
+    // without surfacing a missing-scope error.
     await waitFor(() => expect(sdkState.initialize).toHaveBeenCalledTimes(1))
     expect(screen.getByTestId('error')).toHaveTextContent('')
   })

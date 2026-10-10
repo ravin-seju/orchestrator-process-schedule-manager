@@ -8,7 +8,6 @@ import {
   getAvailableAuthConfigs,
   getConnectionDefaults,
   getDefaultRedirectUri,
-  getMissingRequiredScopes,
   getSelectedAuthConfigId,
   isScopeAcknowledged,
   REQUIRED_ORCHESTRATOR_SCOPE_TEXT,
@@ -213,15 +212,6 @@ describe('UiPath connection config', () => {
     expect(getSelectedAuthConfigId([])).toBeNull()
   })
 
-  it('detects missing required Orchestrator scopes from legacy saved configs', () => {
-    expect(getMissingRequiredScopes('OR.Folders.Read OR.Execution.Read')).toEqual([
-      'OR.Jobs.Read',
-      'OR.Machines.Read',
-      'OR.Robots.Read',
-    ])
-    expect(getMissingRequiredScopes(REQUIRED_ORCHESTRATOR_SCOPE_TEXT)).toEqual([])
-  })
-
   it('heals legacy saved scopes to the full required set on read so sign-in is not stranded', () => {
     window.localStorage.setItem(
       'process-schedule-manager.oauth.custom-auth-configs',
@@ -248,7 +238,6 @@ describe('UiPath connection config', () => {
     const [config] = getAvailableAuthConfigs()
 
     expect(config.scope).toBe(REQUIRED_ORCHESTRATOR_SCOPE_TEXT)
-    expect(getMissingRequiredScopes(config.scope)).toEqual([])
   })
 
   it('records per-group scope acknowledgment and clears it on reset', () => {
