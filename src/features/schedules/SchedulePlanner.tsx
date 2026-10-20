@@ -238,7 +238,7 @@ function Dashboard({
     usage,
     isLoading: isJobHistoryLoading,
   } = useJobRuntimes(sdk, runtimeTenant, runtimeFolderIds.length ? runtimeFolderIds : undefined, utilizationSinceDays)
-  const { capacityRuntimes } = useFolderRuntimes(
+  const { capacityRuntimes, isLoading: isCapacityLoading } = useFolderRuntimes(
     sdk,
     runtimeTenant,
     hasOpenedUtilization && runtimeFolderIds.length ? runtimeFolderIds : undefined,
@@ -732,6 +732,7 @@ function Dashboard({
         />
       ) : (
         <UtilizationView
+          isCapacityLoading={isCapacityLoading}
           isLoading={isJobHistoryLoading}
           model={utilizationModel}
           sinceDays={utilizationSinceDays}

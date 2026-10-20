@@ -16,11 +16,12 @@ const folderNames = new Map([
   [8104, 'Customer Ops'],
 ])
 
-const renderView = (capacityRuntimes: number | null, isLoading = false) =>
+const renderView = (capacityRuntimes: number | null, isCapacityLoading = false) =>
   render(
     <TooltipProvider>
       <UtilizationView
-        isLoading={isLoading}
+        isCapacityLoading={isCapacityLoading}
+        isLoading={false}
         model={buildUtilizationModel({
           capacityRuntimes,
           usage: stressRobotUsage,
@@ -85,10 +86,25 @@ describe('UtilizationView', () => {
     expect(tile('Consumed')).toHaveTextContent('2,952 h')
   })
 
+  it('says capacity is being checked, not unavailable, while runtimes load', () => {
+    renderView(null, true)
+
+    expect(screen.getByText('Checking capacity…')).toBeInTheDocument()
+    expect(screen.queryByText('Capacity unavailable')).not.toBeInTheDocument()
+    expect(tile('Consumed')).toHaveTextContent('2,952 h')
+  })
+
+  it('explains that a robot account can pass 720 hours', () => {
+    renderView(stressCapacityRuntimes)
+
+    expect(screen.getByText(/its hours can pass 720 h \(30 days × 24 h\)/)).toBeInTheDocument()
+  })
+
   it('says job history is loading instead of showing empty tables', () => {
     render(
       <TooltipProvider>
         <UtilizationView
+          isCapacityLoading={false}
           isLoading
           model={buildUtilizationModel({
             capacityRuntimes: null,

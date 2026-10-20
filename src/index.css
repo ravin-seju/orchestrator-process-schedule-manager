@@ -2541,7 +2541,8 @@ h3 {
   padding: 3px 10px;
 }
 
-.utilization-source[data-source='none'] {
+.utilization-source[data-source='none'],
+.utilization-source[data-source='loading'] {
   background: var(--surface-soft);
   color: var(--text-muted);
 }

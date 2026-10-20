@@ -31,7 +31,16 @@ function Tile({ label, value, tone, hint }: { label: string; value: string; tone
   )
 }
 
-function SourceBadge({ model }: { model: UtilizationModel }) {
+function SourceBadge({ model, isLoading }: { model: UtilizationModel; isLoading: boolean }) {
+  // Runtimes come from one request per folder, which takes tens of seconds on a large tenant.
+  // Until they arrive, "unavailable" would read as a failure.
+  if (model.source === null && isLoading) {
+    return (
+      <span className="utilization-source" data-source="loading" aria-live="polite">
+        Checking capacity…
+      </span>
+    )
+  }
   if (model.source === null) {
     return (
       <Tooltip>
@@ -132,10 +141,12 @@ export function UtilizationView({
   model,
   sinceDays,
   isLoading,
+  isCapacityLoading,
 }: {
   model: UtilizationModel
   sinceDays: number
   isLoading: boolean
+  isCapacityLoading: boolean
 }) {
   const tone = model.displayPct != null ? utilizationTone(model.displayPct) : null
   const emptyText = isLoading
@@ -149,7 +160,7 @@ export function UtilizationView({
           <div className="utilization-title">
             <Gauge size={18} aria-hidden="true" />
             <h2>Robot utilization</h2>
-            <SourceBadge model={model} />
+            <SourceBadge isLoading={isCapacityLoading} model={model} />
           </div>
           <span className="utilization-scope">Whole tenant · last {sinceDays} days · filters don't apply</span>
         </header>
@@ -207,7 +218,13 @@ export function UtilizationView({
         </p>
 
         <div className="utilization-tables">
-          <UsageTable caption="By robot" emptyText={emptyText} nameHeading="Robot" rows={model.robots} showBars />
+          <div className="utilization-table-column">
+            <UsageTable caption="By robot" emptyText={emptyText} nameHeading="Robot" rows={model.robots} showBars />
+            <p className="utilization-caveat">
+              Hours are per robot account. One account can run on several runtimes at once, so its hours can pass{' '}
+              {formatNumber(sinceDays * 24)} h ({sinceDays} days × 24 h).
+            </p>
+          </div>
           <div className="utilization-table-column">
             <UsageTable
               caption="By folder (share of consumed)"
