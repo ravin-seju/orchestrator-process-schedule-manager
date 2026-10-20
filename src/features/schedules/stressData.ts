@@ -232,10 +232,10 @@ const buildStressRuntimeStats = (): Map<number, RuntimeStats> => {
 
 export const stressRuntimeStats = buildStressRuntimeStats()
 
-// Utilization fixtures: 10 licensed unattended robots over 30 days = 7,200 h of capacity.
+// Utilization fixtures: 10 deployed runtimes over 30 days = 7,200 h of capacity.
 // 2,952 h consumed (41%), skewed toward Bot.Alpha; Bot.Delta ran nothing in the window.
 const hours = (h: number) => h * 3600
-export const stressLicense = { allowedUnattended: 10, usedUnattended: 4 }
+export const stressCapacityRuntimes = 10
 export const stressRobotUsage: RobotUsage = {
   totalSec: hours(2952),
   byRobot: new Map([

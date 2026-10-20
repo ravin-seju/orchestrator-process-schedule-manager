@@ -12,8 +12,15 @@ import { loadJobHistory } from '@/features/jobs/orchestrator'
 
 const sdk = {} as UiPath
 
-const job = (state: string, startIso: string, minutes: number, robotId: number | null = 1) => ({
+const job = (
+  state: string,
+  startIso: string,
+  minutes: number,
+  robotId: number | null = 1,
+  runtimeType = 'Unattended',
+) => ({
   State: state,
+  RuntimeType: runtimeType,
   StartTime: startIso,
   EndTime: new Date(Date.parse(startIso) + minutes * 60_000).toISOString(),
   StartingScheduleId: 10,
@@ -67,6 +74,23 @@ describe('loadJobHistory usage', () => {
     const { usage } = await loadJobHistory(sdk, 'Demo', [100], 30)
 
     expect(usage.totalSec).toBe(900)
+  })
+
+  it('counts only Unattended and Serverless runs as robot time', async () => {
+    fetchAllPages.mockResolvedValue([
+      job('Successful', '2026-10-01T10:00:00Z', 10, 1, 'Unattended'),
+      job('Successful', '2026-10-01T11:00:00Z', 20, 1, 'Serverless'),
+      job('Successful', '2026-10-01T12:00:00Z', 30, 1, 'Development'),
+      job('Successful', '2026-10-01T13:00:00Z', 40, 1, 'Attended'),
+      { ...job('Successful', '2026-10-01T14:00:00Z', 50), RuntimeType: null },
+    ])
+
+    const { usage, rows } = await loadJobHistory(sdk, 'Demo', [100], 30)
+
+    expect(usage.totalSec).toBe(1800)
+    expect(usage.byRobot.get(1)).toBe(1800)
+    // Runtime stats still use every successful run, whatever it ran on.
+    expect(rows).toHaveLength(5)
   })
 
   it('counts a job with no robot in the total and its folder only', async () => {

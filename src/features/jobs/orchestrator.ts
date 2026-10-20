@@ -10,6 +10,7 @@ interface RawJob {
   Robot?: { Id?: number | null; Name?: string | null } | null
   Release?: { Id?: number | null } | null
   HostMachineName?: string | null
+  RuntimeType?: string | null
 }
 
 interface DurationRow {
@@ -33,7 +34,8 @@ export interface JobHistoryResult {
   // fallback so manual-only schedules still show a (process-level) machine.
   releaseMachineIds: Map<number, number[]>
   // Robot-busy seconds over the window, for the Utilization view. Counts every executed
-  // job (Successful, Faulted, Stopped): a faulted or stopped run still held its robot.
+  // job (Successful, Faulted, Stopped) on a capacity runtime type: a faulted or stopped run
+  // still held its robot.
   usage: RobotUsage
 }
 
@@ -42,6 +44,11 @@ export interface RobotUsage {
   byRobot: Map<number, number>
   byFolder: Map<number, number>
 }
+
+// Runtime types the Utilization view measures, on both sides: capacity counts these runtimes
+// (GetRuntimesForFolder) and consumed time counts jobs that ran on them. Development, Attended,
+// test and other runs are left out of both.
+export const CAPACITY_RUNTIME_TYPES: readonly string[] = ['Unattended', 'Serverless']
 
 // Jobs whose machine association is meaningful — the job actually executed on a host.
 // Excludes never-ran states (Pending/Running/Cancelled/etc.) to avoid phantom machines.
@@ -67,7 +74,7 @@ const toEpoch = (iso: string | null | undefined): number | null => {
 
 async function fetchAllJobs(sdk: UiPath, tenantName: string, folderId: number, sinceIso: string): Promise<RawJob[]> {
   const path =
-    `Jobs?$select=StartTime,EndTime,StartingScheduleId,State,HostMachineName&$expand=Robot($select=Id,Name),Release($select=Id)&$filter=(${EXECUTED_STATES}) and CreationTime gt ${sinceIso}&$top=200`
+    `Jobs?$select=StartTime,EndTime,StartingScheduleId,State,HostMachineName,RuntimeType&$expand=Robot($select=Id,Name),Release($select=Id)&$filter=(${EXECUTED_STATES}) and CreationTime gt ${sinceIso}&$top=200`
   return fetchAllPages<RawJob>(sdk, tenantName, path, folderId)
 }
 
@@ -123,12 +130,14 @@ export async function loadJobHistory(
       if (start == null || end == null) continue
       const durationSec = (end - start) / 1000
       if (durationSec <= 0) continue
-      usage.totalSec += durationSec
-      if (job.Robot?.Id != null) {
-        usage.byRobot.set(job.Robot.Id, (usage.byRobot.get(job.Robot.Id) ?? 0) + durationSec)
-      }
-      if (folderId != null) {
-        usage.byFolder.set(folderId, (usage.byFolder.get(folderId) ?? 0) + durationSec)
+      if (job.RuntimeType && CAPACITY_RUNTIME_TYPES.includes(job.RuntimeType)) {
+        usage.totalSec += durationSec
+        if (job.Robot?.Id != null) {
+          usage.byRobot.set(job.Robot.Id, (usage.byRobot.get(job.Robot.Id) ?? 0) + durationSec)
+        }
+        if (folderId != null) {
+          usage.byFolder.set(folderId, (usage.byFolder.get(folderId) ?? 0) + durationSec)
+        }
       }
       // Duration stats use ONLY successful jobs (faulted/stopped runs would skew median/p90).
       if (job.State !== 'Successful') continue

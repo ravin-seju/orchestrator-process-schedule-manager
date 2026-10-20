@@ -11,8 +11,7 @@ const usage = (byRobot: [number, number][], byFolder: [number, number][] = []): 
 })
 
 const input = (overrides: Partial<UtilizationInput> = {}): UtilizationInput => ({
-  allowedUnattended: 10,
-  totalUnattendedSlots: null,
+  capacityRuntimes: 10,
   usage: usage([[1, hours(1800)], [2, hours(1080)]], [[100, hours(2160)], [200, hours(720)]]),
   sinceDays: 30,
   robotNames: new Map([[1, 'Bot.Alpha'], [2, 'Bot.Beta']]),
@@ -21,10 +20,10 @@ const input = (overrides: Partial<UtilizationInput> = {}): UtilizationInput => (
 })
 
 describe('buildUtilizationModel', () => {
-  it('uses the licensed robot count as capacity when it is known', () => {
+  it('turns deployed runtimes into robot-hours of capacity', () => {
     const model = buildUtilizationModel(input())
-    expect(model.source).toBe('licensed')
-    expect(model.robotCount).toBe(10)
+    expect(model.source).toBe('runtimes')
+    expect(model.capacityRuntimes).toBe(10)
     expect(model.capacityHours).toBe(7200)
     expect(model.consumedHours).toBe(2880)
     expect(model.idleHours).toBe(4320)
@@ -32,25 +31,14 @@ describe('buildUtilizationModel', () => {
     expect(model.displayPct).toBeCloseTo(40)
   })
 
-  it('prefers the license over configured slots when both are present', () => {
-    const model = buildUtilizationModel(input({ totalUnattendedSlots: 4 }))
-    expect(model.source).toBe('licensed')
-    expect(model.robotCount).toBe(10)
+  it('treats zero runtimes as unknown capacity rather than zero', () => {
+    const model = buildUtilizationModel(input({ capacityRuntimes: 0 }))
+    expect(model.source).toBeNull()
+    expect(model.capacityRuntimes).toBeNull()
   })
 
-  it('falls back to configured machine slots when the license is unreadable', () => {
-    const model = buildUtilizationModel(input({ allowedUnattended: null, totalUnattendedSlots: 5 }))
-    expect(model.source).toBe('configured')
-    expect(model.capacityHours).toBe(3600)
-  })
-
-  it('treats a zero licensed count as unknown rather than zero capacity', () => {
-    const model = buildUtilizationModel(input({ allowedUnattended: 0, totalUnattendedSlots: 5 }))
-    expect(model.source).toBe('configured')
-  })
-
-  it('shows consumed hours only when neither capacity source is available', () => {
-    const model = buildUtilizationModel(input({ allowedUnattended: null, totalUnattendedSlots: 0 }))
+  it('shows consumed hours only when capacity is unknown', () => {
+    const model = buildUtilizationModel(input({ capacityRuntimes: null }))
     expect(model.source).toBeNull()
     expect(model.capacityHours).toBeNull()
     expect(model.idleHours).toBeNull()
@@ -58,11 +46,12 @@ describe('buildUtilizationModel', () => {
     expect(model.displayPct).toBeNull()
     expect(model.consumedHours).toBe(2880)
     expect(model.robots).toHaveLength(2)
+    expect(model.folders).toHaveLength(2)
   })
 
   it('clamps the display value above 100% but keeps the raw ratio', () => {
-    // 1 configured slot x 24 h x 30 days = 720 h against 2,880 h consumed.
-    const model = buildUtilizationModel(input({ allowedUnattended: null, totalUnattendedSlots: 1 }))
+    // 1 runtime x 24 h x 30 days = 720 h against 2,880 h consumed: the lower bound was too low.
+    const model = buildUtilizationModel(input({ capacityRuntimes: 1 }))
     expect(model.utilizationPct).toBeCloseTo(400)
     expect(model.displayPct).toBe(100)
     expect(model.idleHours).toBe(0)
@@ -81,6 +70,11 @@ describe('buildUtilizationModel', () => {
       input({ robotNames: new Map([[1, 'Bot.Alpha'], [2, 'Bot.Beta'], [3, 'Bot.Idle']]) }),
     )
     expect(model.robots.at(-1)).toEqual({ id: 3, name: 'Bot.Idle', hours: 0, sharePct: 0 })
+  })
+
+  it('names an unknown robot by its id', () => {
+    const model = buildUtilizationModel(input({ robotNames: new Map([[1, 'Bot.Alpha']]) }))
+    expect(model.robots.map((r) => r.name)).toEqual(['Bot.Alpha', 'Robot 2'])
   })
 
   it('reports folders as a share of consumed hours, with a fallback name', () => {

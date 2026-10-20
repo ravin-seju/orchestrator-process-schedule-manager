@@ -1,9 +1,9 @@
 import type { RobotUsage } from '@/features/jobs/orchestrator'
 
-// Where the capacity number comes from. 'licensed' = Orchestrator's licensed unattended
-// robot count; 'configured' = the sum of machine unattended slots, an estimate used when the
-// license can't be read; null = neither is known, so only consumed hours can be shown.
-export type CapacitySource = 'licensed' | 'configured' | null
+// Where the capacity number comes from. 'runtimes' = deployed Unattended/Serverless runtimes,
+// a lower bound (largest single-folder total, see loadFolderRuntimes); null = unknown, so only
+// consumed hours can be shown. Licensed counts are out of reach: those endpoints answer 403.
+export type CapacitySource = 'runtimes' | null
 
 export interface UtilizationRow {
   id: number
@@ -14,11 +14,11 @@ export interface UtilizationRow {
 
 export interface UtilizationModel {
   source: CapacitySource
-  robotCount: number | null
+  capacityRuntimes: number | null
   capacityHours: number | null
   consumedHours: number
   idleHours: number | null
-  // Raw ratio; it can pass 100 when the capacity is the configured-slot estimate.
+  // Raw ratio; it can pass 100 because the capacity is a lower bound.
   utilizationPct: number | null
   // Clamped to 0-100 for the meter and the headline tile.
   displayPct: number | null
@@ -27,8 +27,7 @@ export interface UtilizationModel {
 }
 
 export interface UtilizationInput {
-  allowedUnattended: number | null
-  totalUnattendedSlots: number | null
+  capacityRuntimes: number | null
   usage: RobotUsage
   sinceDays: number
   robotNames: Map<number, string>
@@ -51,21 +50,16 @@ const toRows = (
     }))
     .sort((a, b) => b.hours - a.hours || a.name.localeCompare(b.name))
 
-const positive = (value: number | null) => (value != null && value > 0 ? value : null)
-
 export function buildUtilizationModel({
-  allowedUnattended,
-  totalUnattendedSlots,
+  capacityRuntimes,
   usage,
   sinceDays,
   robotNames,
   folderNames,
 }: UtilizationInput): UtilizationModel {
-  const licensed = positive(allowedUnattended)
-  const configured = positive(totalUnattendedSlots)
-  const source: CapacitySource = licensed != null ? 'licensed' : configured != null ? 'configured' : null
-  const robotCount = licensed ?? configured
-  const capacityHours = robotCount != null ? robotCount * HOURS_PER_DAY * sinceDays : null
+  const runtimes = capacityRuntimes != null && capacityRuntimes > 0 ? capacityRuntimes : null
+  const source: CapacitySource = runtimes != null ? 'runtimes' : null
+  const capacityHours = runtimes != null ? runtimes * HOURS_PER_DAY * sinceDays : null
   const consumedHours = usage.totalSec / 3600
   const utilizationPct = capacityHours ? (consumedHours / capacityHours) * 100 : null
 
@@ -77,7 +71,7 @@ export function buildUtilizationModel({
 
   return {
     source,
-    robotCount,
+    capacityRuntimes: runtimes,
     capacityHours,
     consumedHours,
     idleHours: capacityHours != null ? Math.max(0, capacityHours - consumedHours) : null,
