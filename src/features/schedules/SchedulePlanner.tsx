@@ -72,10 +72,15 @@ import type {
   WorkspaceView,
 } from './types'
 import { useJobRuntimes } from '@/features/jobs/hooks/useJobRuntimes'
+import { useFolderRuntimes } from '@/features/machines/hooks/useFolderRuntimes'
+import { buildUtilizationModel } from '@/features/utilization/model'
+import { UtilizationView } from '@/features/utilization/components/UtilizationView'
 import { fetchOData, fetchODataMetadata } from '@/features/orchestrator/odataClient'
 import { cacheClear, cacheKey } from '@/features/orchestrator/cache'
 
 const testingRouteEnabled = import.meta.env.VITE_ENABLE_TESTING_ROUTE === 'true'
+// Job-history window: runtime stats and the Utilization view share the same 30 days of jobs.
+const utilizationSinceDays = 30
 const testingConnectionTitle = testingRouteEnabled
   ? 'Generated stress-test triggers are loaded locally. No Orchestrator triggers were created or changed.'
   : ''
@@ -165,7 +170,13 @@ function Dashboard({
   const [viewMode, setViewMode] = useState<ViewMode>(readInitialViewMode)
   const [monthSpanLaneLimit, setMonthSpanLaneLimit] = useState(defaultMonthSpanLaneLimit)
   const weekSpanLaneLimit = weekVisibleSpanRows
-  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('calendar')
+  const [workspaceView, setWorkspaceViewState] = useState<WorkspaceView>('calendar')
+  // Folder runtimes cost one request per folder, so they load only once Utilization is opened.
+  const [hasOpenedUtilization, setHasOpenedUtilization] = useState(false)
+  const setWorkspaceView = useCallback((view: WorkspaceView) => {
+    setWorkspaceViewState(view)
+    if (view === 'utilization') setHasOpenedUtilization(true)
+  }, [])
   const [selectedDayDetail, setSelectedDayDetail] = useState<SelectedDayDetail | null>(null)
   const [isUpcomingExpanded, setIsUpcomingExpanded] = useState(false)
   const [query, setQuery] = useState('')
@@ -218,7 +229,33 @@ function Dashboard({
     () => Array.from(new Set(schedules.map((s) => s.folderId))),
     [schedules],
   )
-  const { runtimeStats, robotNames, machineNames, scheduleMachineIds, releaseMachineIds } = useJobRuntimes(sdk, runtimeTenant, runtimeFolderIds.length ? runtimeFolderIds : undefined)
+  const {
+    runtimeStats,
+    robotNames,
+    machineNames,
+    scheduleMachineIds,
+    releaseMachineIds,
+    usage,
+    isLoading: isJobHistoryLoading,
+  } = useJobRuntimes(sdk, runtimeTenant, runtimeFolderIds.length ? runtimeFolderIds : undefined, utilizationSinceDays)
+  const { capacityRuntimes } = useFolderRuntimes(
+    sdk,
+    runtimeTenant,
+    hasOpenedUtilization && runtimeFolderIds.length ? runtimeFolderIds : undefined,
+  )
+  const utilizationModel = useMemo(
+    () =>
+      buildUtilizationModel({
+        capacityRuntimes,
+        usage,
+        sinceDays: utilizationSinceDays,
+        robotNames,
+        folderNames: new Map(
+          folders.map((folder) => [folder.Id, folder.FullyQualifiedName || folder.DisplayName || `Folder ${folder.Id}`]),
+        ),
+      }),
+    [capacityRuntimes, usage, robotNames, folders],
+  )
   // Effective machine-per-schedule: direct scheduled-job machines, with release (manual-run)
   // machines as a fallback only for schedules that have no direct association.
   const effectiveScheduleMachineIds = useMemo(
@@ -442,7 +479,7 @@ function Dashboard({
     handleQueryChange('')
     setSelectedFolderIds([])
     setAttentionFilter('expired')
-  }, [handleStatusFilterChange, handleQueryChange])
+  }, [handleStatusFilterChange, handleQueryChange, setWorkspaceView])
   const attentionChipLabel: Record<Exclude<AttentionFilter, 'none'>, string> = {
     collisions: 'Collisions only',
     duplicates: 'Duplicates only',
@@ -683,7 +720,7 @@ function Dashboard({
             scheduleMachineIds={effectiveScheduleMachineIds}
           />
         </section>
-      ) : (
+      ) : workspaceView === 'inventory' ? (
         <ScheduleTable
           schedules={filteredSchedules}
           className="inventory-view"
@@ -692,6 +729,12 @@ function Dashboard({
           robotNames={robotNames}
           machineNames={machineNames}
           scheduleMachineIds={effectiveScheduleMachineIds}
+        />
+      ) : (
+        <UtilizationView
+          isLoading={isJobHistoryLoading}
+          model={utilizationModel}
+          sinceDays={utilizationSinceDays}
         />
       )}
     </main>

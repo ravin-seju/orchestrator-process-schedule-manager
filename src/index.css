@@ -100,6 +100,7 @@
   --metric-robots: #c2476e;
   --metric-suppressed: var(--orange);
   --metric-expiring: var(--warning);
+  --metric-utilization: #2563eb;
   --env-alpha-accent: #7c3aed;
   --dense-cluster-bg: #fff0e9;
   --dense-cluster-border: color-mix(in srgb, var(--orange) 58%, var(--border));
@@ -191,6 +192,7 @@
   --metric-robots: #ff7aa8;
   --metric-suppressed: var(--orange);
   --metric-expiring: var(--warning);
+  --metric-utilization: #60a5fa;
   --env-alpha-accent: #a78bfa;
   --font-xxs: 10px;
   --font-xs: 11px;
@@ -2161,6 +2163,16 @@ h3 {
   padding: 6px 0 4px;
 }
 
+/* The toggle groups clip their overflow, which lets an auto grid track shrink them below their
+   buttons. While their tracks are auto (wider than the 1280px breakpoint below), hold them at
+   content width so the flexible filter columns give way instead. */
+@media (min-width: 1281px) {
+  .control-band > .segmented-control,
+  .control-band > .view-switcher {
+    min-width: max-content;
+  }
+}
+
 .search-control {
   align-items: center;
   background: var(--surface-soft);
@@ -2390,7 +2402,7 @@ h3 {
 }
 
 .view-switcher {
-  grid-template-columns: repeat(2, minmax(86px, 1fr));
+  grid-template-columns: repeat(3, minmax(86px, 1fr));
 }
 
 .calendar-view-toggle {
@@ -2466,6 +2478,171 @@ h3 {
   min-height: 0;
   overflow: hidden;
   padding: 4px 0 8px;
+}
+
+/* Utilization view: one scrolling panel in the workspace slot the inventory uses. */
+.utilization-view {
+  grid-area: workspace;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0 8px;
+}
+
+.utilization-panel {
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 84%, var(--accent) 16%);
+  border-radius: 14px;
+  box-shadow: var(--shadow-soft);
+  display: grid;
+  gap: 16px;
+  padding: 16px 18px 18px;
+}
+
+.utilization-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  justify-content: space-between;
+}
+
+.utilization-title {
+  align-items: center;
+  color: var(--text-strong);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.utilization-title h2 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.utilization-scope,
+.utilization-caveat {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+.utilization-caveat {
+  margin: 0;
+}
+
+.utilization-source {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  border-radius: 999px;
+  /* Pure --success on its own tint is under 4.5:1 at this size in light mode; leaning toward
+     --text-strong darkens it in light and lightens it in dark. */
+  color: color-mix(in srgb, var(--success) 65%, var(--text-strong));
+  font-size: var(--font-xs);
+  font-weight: 600;
+  padding: 3px 10px;
+}
+
+.utilization-source[data-source='none'] {
+  background: var(--surface-soft);
+  color: var(--text-muted);
+}
+
+.utilization-tiles {
+  flex-wrap: wrap;
+  row-gap: 12px;
+}
+
+.utilization-meter {
+  background: var(--surface-soft);
+  border-radius: 5px;
+  height: 10px;
+  position: relative;
+}
+
+.utilization-meter-fill {
+  border-radius: 5px;
+  display: block;
+  height: 100%;
+}
+
+.utilization-meter-tick {
+  background: var(--text-muted);
+  bottom: -3px;
+  opacity: 0.5;
+  position: absolute;
+  top: -3px;
+  width: 1px;
+}
+
+.utilization-meter-scale {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  height: 14px;
+  margin-top: 4px;
+  position: relative;
+}
+
+.utilization-meter-scale span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.utilization-meter-scale span:first-child {
+  transform: none;
+}
+
+.utilization-meter-scale span:last-child {
+  transform: translateX(-100%);
+}
+
+.utilization-tables {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+}
+
+.utilization-table-column {
+  display: grid;
+  gap: 8px;
+}
+
+.utilization-table-block h3 {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.utilization-table-scroll {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.utilization-share-bar {
+  background: var(--surface-soft);
+  border-radius: 3px;
+  display: block;
+  height: 6px;
+  overflow: hidden;
+}
+
+.utilization-share-bar > span {
+  background: var(--metric-utilization);
+  display: block;
+  height: 100%;
+}
+
+.inventory-table .utilization-empty {
+  color: var(--text-muted);
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .utilization-tables {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .calendar-panel,
@@ -4719,7 +4896,10 @@ button.year-day {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .view-switcher,
+  .view-switcher {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .calendar-view-toggle {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -5595,6 +5775,12 @@ html[data-design='data-workspace-console'] .inventory-table tbody td {
   .control-band {
     grid-template-columns:
       minmax(220px, 1.5fr) minmax(130px, 1fr) minmax(130px, 1fr) auto;
+  }
+
+  /* Second row holds trigger type, status and the view switcher, leaving the auto column empty;
+     the three-way switcher takes it rather than clipping inside one 1fr cell. */
+  .control-band > .view-switcher {
+    grid-column: span 2;
   }
 }
 

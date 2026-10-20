@@ -484,9 +484,9 @@ export function FilterToolbar({
         type="single"
         value={workspaceView}
       >
-        {(['calendar', 'inventory'] as WorkspaceView[]).map((view) => (
+        {(['calendar', 'inventory', 'utilization'] as WorkspaceView[]).map((view) => (
           <ToggleGroupItem key={view} value={view}>
-            {view === 'calendar' ? 'Calendar' : 'Inventory'}
+            {view === 'calendar' ? 'Calendar' : view === 'inventory' ? 'Inventory' : 'Utilization'}
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
