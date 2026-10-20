@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { UiPath } from '@uipath/uipath-typescript/core'
-import { aggregateRuntimes, loadJobHistory } from '../orchestrator'
+import { aggregateRuntimes, loadJobHistory, type RobotUsage } from '../orchestrator'
 import { isTestingPath } from '@/features/schedules/calendarDisplay'
 import type { RuntimeStats } from '@/features/schedules/types'
 import { cacheGetEntry, cacheSet, cacheKey } from '@/features/orchestrator/cache'
@@ -13,12 +13,15 @@ type CachedRuntime = {
   machineNames: [number, string][]
   scheduleMachineIds: [number, number[]][]
   releaseMachineIds: [number, number[]][]
+  usage: { totalSec: number; byRobot: [number, number][]; byFolder: [number, number][] }
   folderKey: string
   sinceDays: number
 }
 
 const testingRouteEnabled = import.meta.env.VITE_ENABLE_TESTING_ROUTE === 'true'
 const loadStressData = testingRouteEnabled ? () => import('@/features/schedules/stressData') : null
+
+const emptyUsage = (): RobotUsage => ({ totalSec: 0, byRobot: new Map(), byFolder: new Map() })
 
 export function useJobRuntimes(
   sdk?: UiPath | null,
@@ -31,6 +34,7 @@ export function useJobRuntimes(
   const [machineNames, setMachineNames] = useState<Map<number, string>>(new Map())
   const [scheduleMachineIds, setScheduleMachineIds] = useState<Map<number, number[]>>(new Map())
   const [releaseMachineIds, setReleaseMachineIds] = useState<Map<number, number[]>>(new Map())
+  const [usage, setUsage] = useState<RobotUsage>(emptyUsage)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -46,6 +50,7 @@ export function useJobRuntimes(
         setMachineNames(m.stressMachineNames)
         setScheduleMachineIds(m.stressScheduleMachineIds)
         setReleaseMachineIds(m.stressReleaseMachineIds)
+        setUsage(m.stressRobotUsage)
       })
       return () => { isActive = false }
     }
@@ -64,7 +69,7 @@ export function useJobRuntimes(
       const cached = cacheGetEntry<CachedRuntime>(statsKey)
 
       const revalidate = async () => {
-        const { rows, robotNames: names, machineNames: mNames, scheduleMachineIds: schedMachines, releaseMachineIds: relMachines } =
+        const { rows, robotNames: names, machineNames: mNames, scheduleMachineIds: schedMachines, releaseMachineIds: relMachines, usage: jobUsage } =
           await loadJobHistory(sdk, tenantName, folderIds!, sinceDays)
         if (!isActive) return
         const stats = aggregateRuntimes(rows)
@@ -74,6 +79,11 @@ export function useJobRuntimes(
           machineNames: [...mNames.entries()],
           scheduleMachineIds: [...schedMachines.entries()],
           releaseMachineIds: [...relMachines.entries()],
+          usage: {
+            totalSec: jobUsage.totalSec,
+            byRobot: [...jobUsage.byRobot.entries()],
+            byFolder: [...jobUsage.byFolder.entries()],
+          },
           folderKey: sortedFolderKey,
           sinceDays,
         }, RUNTIME_STATS_TTL_MS)
@@ -82,6 +92,7 @@ export function useJobRuntimes(
         setMachineNames(mNames)
         setScheduleMachineIds(schedMachines)
         setReleaseMachineIds(relMachines)
+        setUsage(jobUsage)
       }
 
       if (cached && cached.data.folderKey === sortedFolderKey && cached.data.sinceDays === sinceDays) {
@@ -91,6 +102,11 @@ export function useJobRuntimes(
         setMachineNames(new Map(cached.data.machineNames ?? []))
         setScheduleMachineIds(new Map(cached.data.scheduleMachineIds ?? []))
         setReleaseMachineIds(new Map(cached.data.releaseMachineIds ?? []))
+        setUsage({
+          totalSec: cached.data.usage.totalSec,
+          byRobot: new Map(cached.data.usage.byRobot),
+          byFolder: new Map(cached.data.usage.byFolder),
+        })
         if (cached.isStale) {
           revalidate().catch((err) => console.warn('Background runtime refresh failed:', err))
         }
@@ -119,5 +135,5 @@ export function useJobRuntimes(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sdk, tenantName, folderKey, sinceDays])
 
-  return { runtimeStats, robotNames, machineNames, scheduleMachineIds, releaseMachineIds, isLoading, error }
+  return { runtimeStats, robotNames, machineNames, scheduleMachineIds, releaseMachineIds, usage, isLoading, error }
 }

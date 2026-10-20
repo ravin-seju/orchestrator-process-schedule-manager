@@ -32,6 +32,15 @@ export interface JobHistoryResult {
   // ReleaseId → machine keys from MANUAL runs (no StartingScheduleId). Used as a
   // fallback so manual-only schedules still show a (process-level) machine.
   releaseMachineIds: Map<number, number[]>
+  // Robot-busy seconds over the window, for the Utilization view. Counts every executed
+  // job (Successful, Faulted, Stopped): a faulted or stopped run still held its robot.
+  usage: RobotUsage
+}
+
+export interface RobotUsage {
+  totalSec: number
+  byRobot: Map<number, number>
+  byFolder: Map<number, number>
 }
 
 // Jobs whose machine association is meaningful — the job actually executed on a host.
@@ -82,8 +91,11 @@ export async function loadJobHistory(
   const machineNames = new Map<number, string>()
   const scheduleMachineSets = new Map<number, Set<number>>()
   const releaseMachineSets = new Map<number, Set<number>>()
-  for (const result of settled) {
+  const usage: RobotUsage = { totalSec: 0, byRobot: new Map(), byFolder: new Map() }
+  // settledBatch keeps input order, so settled[i] holds folderIds[i]'s jobs.
+  for (const [index, result] of settled.entries()) {
     if (result.status !== 'fulfilled') continue
+    const folderId = folderIds[index]
     for (const job of result.value) {
       if (job.Robot?.Id != null && job.Robot.Name) {
         robotNames.set(job.Robot.Id, job.Robot.Name)
@@ -106,13 +118,20 @@ export async function loadJobHistory(
           releaseMachineSets.set(job.Release.Id, set)
         }
       }
-      // Duration stats use ONLY successful jobs (faulted/stopped runs would skew median/p90).
-      if (job.State !== 'Successful') continue
       const start = toEpoch(job.StartTime)
       const end = toEpoch(job.EndTime)
       if (start == null || end == null) continue
       const durationSec = (end - start) / 1000
       if (durationSec <= 0) continue
+      usage.totalSec += durationSec
+      if (job.Robot?.Id != null) {
+        usage.byRobot.set(job.Robot.Id, (usage.byRobot.get(job.Robot.Id) ?? 0) + durationSec)
+      }
+      if (folderId != null) {
+        usage.byFolder.set(folderId, (usage.byFolder.get(folderId) ?? 0) + durationSec)
+      }
+      // Duration stats use ONLY successful jobs (faulted/stopped runs would skew median/p90).
+      if (job.State !== 'Successful') continue
       rows.push({
         scheduleId: job.StartingScheduleId ?? null,
         durationSec,
@@ -129,7 +148,7 @@ export async function loadJobHistory(
     releaseMachineIds.set(releaseId, [...set])
   }
 
-  return { rows, robotNames, machineNames, scheduleMachineIds, releaseMachineIds }
+  return { rows, robotNames, machineNames, scheduleMachineIds, releaseMachineIds, usage }
 }
 
 export function aggregateRuntimes(rows: DurationRow[]): Map<number, RuntimeStats> {
