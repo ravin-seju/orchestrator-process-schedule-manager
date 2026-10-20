@@ -126,7 +126,7 @@ describe('UtilizationView', () => {
   it('puts the runtime type table above the robot and folder tables', () => {
     renderView()
 
-    const captions = [...document.querySelectorAll('.utilization-table-block h3')].map((h) => h.textContent)
+    const captions = [...document.querySelectorAll('.utilization-table-block h3')].map((h) => h.textContent?.trim())
     expect(captions).toEqual(['By runtime type', 'By robot', 'By root folder (share of consumed)'])
   })
 
@@ -171,9 +171,15 @@ describe('UtilizationView', () => {
     expect(screen.queryByText('Capacity unavailable')).not.toBeInTheDocument()
   })
 
-  it('explains that a robot account can pass 720 hours', () => {
+  it('explains, behind the robot table info icon, that an account can pass 720 hours', async () => {
     renderView()
-    expect(screen.getByText(/its hours can pass 720 h \(30 days × 24 h\)/)).toBeInTheDocument()
+    fireEvent.focus(screen.getByRole('img', { name: 'About the robot table' }))
+    expect((await screen.findByRole('tooltip')).textContent).toContain('its hours can pass 720 h (30 days × 24 h)')
+  })
+
+  it('names the counted column plainly', () => {
+    renderView()
+    expect(screen.getByRole('columnheader', { name: 'Counted in utilization' })).toBeInTheDocument()
   })
 
   it('says job history is loading instead of showing empty tables', () => {

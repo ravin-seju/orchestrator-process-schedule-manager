@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { Gauge } from 'lucide-react'
+import { Gauge, Info } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatNumber } from '@/features/schedules/formatters'
 import {
@@ -15,7 +15,23 @@ const formatHours = (hours: number) =>
 
 const formatPct = (pct: number) => `${Math.round(pct)}%`
 
-const toneColor = { low: 'var(--teal)', medium: 'var(--orange)', high: 'var(--danger)' } as const
+// Higher is better: idle robot capacity is what schedules should be using. Low utilization is red
+// (schedules need work), the middle band orange, and high utilization green.
+const toneColor = { low: 'var(--danger)', medium: 'var(--orange)', high: 'var(--success)' } as const
+
+// Explanations sit behind an info icon so the whole view fits the screen without scrolling.
+function InfoTip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span aria-label={label} className="utilization-info" role="img" tabIndex={0}>
+          <Info size={13} aria-hidden="true" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="utilization-hint">{children}</TooltipContent>
+    </Tooltip>
+  )
+}
 
 const COUNTED_TYPES_TEXT = 'production and testing runtimes (Unattended, Cloud VM, Cloud Serverless, Non-production and the Testing types)'
 
@@ -108,10 +124,12 @@ function RobotRuntimeTypes({ types }: { types: RobotRow['runtimeTypes'] }) {
   )
 }
 
-function RobotTable({ rows, emptyText }: { rows: RobotRow[]; emptyText: string }) {
+function RobotTable({ rows, emptyText, info }: { rows: RobotRow[]; emptyText: string; info: ReactNode }) {
   return (
     <div className="utilization-table-block">
-      <h3>By robot</h3>
+      <h3>
+        By robot <InfoTip label="About the robot table">{info}</InfoTip>
+      </h3>
       <div className="utilization-table-scroll">
         <table className="inventory-table utilization-table">
           <colgroup>
@@ -158,10 +176,12 @@ function RobotTable({ rows, emptyText }: { rows: RobotRow[]; emptyText: string }
   )
 }
 
-function RootFolderTable({ rows, emptyText }: { rows: RootFolderRow[]; emptyText: string }) {
+function RootFolderTable({ rows, emptyText, info }: { rows: RootFolderRow[]; emptyText: string; info: ReactNode }) {
   return (
     <div className="utilization-table-block">
-      <h3>By root folder (share of consumed)</h3>
+      <h3>
+        By root folder (share of consumed) <InfoTip label="About the root folder table">{info}</InfoTip>
+      </h3>
       <div className="utilization-table-scroll">
         <table className="inventory-table utilization-table">
           <colgroup>
@@ -200,10 +220,12 @@ function RootFolderTable({ rows, emptyText }: { rows: RootFolderRow[]; emptyText
   )
 }
 
-function RuntimeTypeTable({ rows, emptyText }: { rows: RuntimeTypeRow[]; emptyText: string }) {
+function RuntimeTypeTable({ rows, emptyText, info }: { rows: RuntimeTypeRow[]; emptyText: string; info: ReactNode }) {
   return (
-    <div className="utilization-table-block">
-      <h3>By runtime type</h3>
+    <div className="utilization-table-block utilization-types">
+      <h3>
+        By runtime type <InfoTip label="About the runtime type table">{info}</InfoTip>
+      </h3>
       <div className="utilization-table-scroll">
         <table className="inventory-table utilization-table">
           <colgroup>
@@ -217,7 +239,7 @@ function RuntimeTypeTable({ rows, emptyText }: { rows: RuntimeTypeRow[]; emptyTe
               <th scope="col">Runtime type</th>
               <th scope="col">Runtimes</th>
               <th scope="col">Hours</th>
-              <th scope="col">In headline</th>
+              <th scope="col">Counted in utilization</th>
             </tr>
           </thead>
           <tbody>
@@ -270,7 +292,13 @@ export function UtilizationView({
             <h2>Robot utilization</h2>
             <SourceBadge isLoading={isCapacityLoading} model={model} />
           </div>
-          <span className="utilization-scope">Whole tenant · last {sinceDays} days · filters don't apply</span>
+          <span className="utilization-scope">
+            Whole tenant · last {sinceDays} days · filters don't apply{' '}
+            <InfoTip label="What is counted">
+              Consumed counts job time on {COUNTED_TYPES_TEXT}, including faulted and stopped runs, in folders that have
+              at least one trigger. Personal workspaces are left out.
+            </InfoTip>
+          </span>
         </header>
 
         <div className="header-metric-stats utilization-tiles">
@@ -360,34 +388,40 @@ export function UtilizationView({
           </div>
         ) : null}
 
-        <p className="utilization-caveat">
-          Consumed counts job time on {COUNTED_TYPES_TEXT}, including faulted and stopped runs, in folders that have at
-          least one trigger. Personal workspaces are left out.
-        </p>
-
-        <div className="utilization-table-column">
-          <RuntimeTypeTable emptyText={emptyText} rows={model.runtimeTypes} />
-          <p className="utilization-caveat">
-            Runtimes is the most of that type deployed to any one folder. Types marked No are shown for reference and are
-            not in the headline.
-          </p>
-        </div>
+        <div className="utilization-body">
+        <RuntimeTypeTable
+          emptyText={emptyText}
+          info={
+            <>
+              Runtimes is the most of that type deployed to any one folder. Counted types make up the capacity and
+              consumed figures; the others are shown for reference only.
+            </>
+          }
+          rows={model.runtimeTypes}
+        />
 
         <div className="utilization-tables">
-          <div className="utilization-table-column">
-            <RobotTable emptyText={emptyText} rows={model.robots} />
-            <p className="utilization-caveat">
-              Hours are per robot account. One account can run on several runtimes at once, so its hours can pass{' '}
-              {formatNumber(sinceDays * 24)} h ({sinceDays} days × 24 h).
-            </p>
-          </div>
-          <div className="utilization-table-column">
-            <RootFolderTable emptyText={emptyText} rows={model.rootFolders} />
-            <p className="utilization-caveat">
-              Sub-folders roll up into their root folder. Capacity is not split by folder: machines are shared across
-              folders, so per-folder capacity would count them more than once.
-            </p>
-          </div>
+          <RobotTable
+            emptyText={emptyText}
+            info={
+              <>
+                Hours are per robot account. One account can run on several runtimes at once, so its hours can pass{' '}
+                {formatNumber(sinceDays * 24)} h ({sinceDays} days × 24 h).
+              </>
+            }
+            rows={model.robots}
+          />
+          <RootFolderTable
+            emptyText={emptyText}
+            info={
+              <>
+                Sub-folders roll up into their root folder. Capacity is not split by folder: machines are shared across
+                folders, so per-folder capacity would count them more than once.
+              </>
+            }
+            rows={model.rootFolders}
+          />
+        </div>
         </div>
       </div>
     </section>

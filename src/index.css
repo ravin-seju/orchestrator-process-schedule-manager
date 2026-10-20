@@ -2480,11 +2480,14 @@ h3 {
   padding: 4px 0 8px;
 }
 
-/* Utilization view: one scrolling panel in the workspace slot the inventory uses. */
+/* Utilization view: fills the workspace slot the inventory uses without scrolling the page.
+   The headline rows keep their height, the runtime-type table is capped, and the robot and folder
+   tables take the rest of the height and scroll inside themselves. */
 .utilization-view {
+  display: grid;
   grid-area: workspace;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 4px 0 8px;
 }
 
@@ -2493,9 +2496,31 @@ h3 {
   border: 1px solid color-mix(in srgb, var(--border) 84%, var(--accent) 16%);
   border-radius: 14px;
   box-shadow: var(--shadow-soft);
-  display: grid;
-  gap: 16px;
-  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px 18px 16px;
+}
+
+.utilization-panel > * {
+  flex: 0 0 auto;
+}
+
+.utilization-info {
+  align-items: center;
+  color: var(--text-muted);
+  cursor: help;
+  display: inline-flex;
+  margin-left: 2px;
+  vertical-align: -2px;
+}
+
+.utilization-info:focus-visible {
+  border-radius: 4px;
+  box-shadow: var(--focus);
+  outline: none;
 }
 
 .utilization-header {
@@ -2595,20 +2620,33 @@ h3 {
   transform: translateX(-100%);
 }
 
+/* The three tables share the height left under the headline. The robot and folder tables are
+   guaranteed 150px first; the runtime-type table takes up to its content height from what's
+   left and scrolls when there isn't room. */
+.utilization-panel > .utilization-body {
+  display: grid;
+  flex: 1 1 0;
+  gap: 12px;
+  grid-template-rows: minmax(0, max-content) minmax(150px, 1fr);
+  min-height: 0;
+}
+
 .utilization-tables {
-  align-items: start;
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  min-height: 0;
 }
 
-.utilization-table-column {
-  display: grid;
-  gap: 8px;
+.utilization-table-block {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .utilization-table-block h3 {
   color: var(--text-muted);
+  flex: 0 0 auto;
   font-size: var(--font-sm);
   font-weight: 600;
   margin: 0 0 6px;
@@ -2617,8 +2655,14 @@ h3 {
 .utilization-table-scroll {
   border: 1px solid var(--border);
   border-radius: 10px;
-  max-height: 420px;
+  flex: 0 1 auto;
+  min-height: 0;
   overflow: auto;
+}
+
+/* The runtime-type table usually has a handful of rows; past about five it scrolls. */
+.utilization-types .utilization-table-scroll {
+  max-height: 220px;
 }
 
 .utilization-share-bar {
@@ -2668,9 +2712,29 @@ h3 {
   text-align: center;
 }
 
+/* Stacked on narrow screens the tables can't share one screen height, so the panel scrolls
+   instead, and each table gets a fixed scroll height. */
 @media (max-width: 900px) {
+  .utilization-view {
+    overflow: auto;
+  }
+
+  .utilization-panel {
+    overflow: visible;
+  }
+
+  .utilization-panel > .utilization-body {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+  }
+
   .utilization-tables {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .utilization-table-scroll {
+    max-height: 420px;
   }
 }
 

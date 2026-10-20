@@ -198,7 +198,7 @@ export function buildUtilizationModel({
   }
 }
 
-// Meter and headline tone: under 50% teal, 50-85% orange, above 85% red.
+// Meter and headline tone. Higher is better: under 50% (schedules need work), 50-85%, above 85%.
 export type UtilizationTone = 'low' | 'medium' | 'high'
 
 export const utilizationTone = (pct: number): UtilizationTone =>
