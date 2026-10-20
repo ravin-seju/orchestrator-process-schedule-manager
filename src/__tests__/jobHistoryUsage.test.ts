@@ -8,7 +8,7 @@ vi.mock('@/features/orchestrator/odataClient', async (importOriginal) => ({
   fetchAllPages,
 }))
 
-import { loadJobHistory } from '@/features/jobs/orchestrator'
+import { loadJobHistory, type UsageEntry } from '@/features/jobs/orchestrator'
 
 const sdk = {} as UiPath
 
@@ -17,7 +17,7 @@ const job = (
   startIso: string,
   minutes: number,
   robotId: number | null = 1,
-  runtimeType = 'Unattended',
+  runtimeType: string | null = 'Unattended',
 ) => ({
   State: state,
   RuntimeType: runtimeType,
@@ -28,6 +28,9 @@ const job = (
   Robot: robotId == null ? null : { Id: robotId, Name: `bot-${robotId}` },
   Release: { Id: 5 },
 })
+
+const sorted = (usage: UsageEntry[]) =>
+  [...usage].sort((a, b) => a.folderId - b.folderId || String(a.runtimeType).localeCompare(String(b.runtimeType)))
 
 beforeEach(() => {
   fetchAllPages.mockReset()
@@ -43,11 +46,36 @@ describe('loadJobHistory usage', () => {
 
     const { usage } = await loadJobHistory(sdk, 'Demo', [100, 200], 30)
 
-    expect(usage.byFolder.get(100)).toBe(3600)
-    expect(usage.byFolder.get(200)).toBe(1800)
-    expect(usage.byRobot.get(1)).toBe(3600)
-    expect(usage.byRobot.get(2)).toBe(1800)
-    expect(usage.totalSec).toBe(5400)
+    expect(sorted(usage)).toEqual([
+      { folderId: 100, runtimeType: 'Unattended', robotId: 1, sec: 3600 },
+      { folderId: 200, runtimeType: 'Unattended', robotId: 2, sec: 1800 },
+    ])
+  })
+
+  it('adds up jobs that share a folder, runtime type and robot', async () => {
+    fetchAllPages.mockResolvedValue([
+      job('Successful', '2026-10-01T10:00:00Z', 10),
+      job('Successful', '2026-10-01T11:00:00Z', 20),
+      job('Successful', '2026-10-01T12:00:00Z', 5, 1, 'Serverless'),
+    ])
+
+    const { usage } = await loadJobHistory(sdk, 'Demo', [100], 30)
+
+    expect(sorted(usage)).toEqual([
+      { folderId: 100, runtimeType: 'Serverless', robotId: 1, sec: 300 },
+      { folderId: 100, runtimeType: 'Unattended', robotId: 1, sec: 1800 },
+    ])
+  })
+
+  it('keeps every runtime type; the model decides which ones count', async () => {
+    fetchAllPages.mockResolvedValue([
+      job('Successful', '2026-10-01T10:00:00Z', 10, 1, 'Development'),
+      job('Successful', '2026-10-01T11:00:00Z', 10, 1, null),
+    ])
+
+    const { usage } = await loadJobHistory(sdk, 'Demo', [100], 30)
+
+    expect(usage.map((entry) => entry.runtimeType)).toEqual(['Development', null])
   })
 
   it('counts faulted and stopped runs as robot time but keeps them out of runtime stats', async () => {
@@ -59,7 +87,7 @@ describe('loadJobHistory usage', () => {
 
     const { usage, rows } = await loadJobHistory(sdk, 'Demo', [100], 30)
 
-    expect(usage.totalSec).toBe(3600)
+    expect(usage).toEqual([{ folderId: 100, runtimeType: 'Unattended', robotId: 1, sec: 3600 }])
     expect(rows).toHaveLength(1)
     expect(rows[0].durationSec).toBe(600)
   })
@@ -73,34 +101,15 @@ describe('loadJobHistory usage', () => {
 
     const { usage } = await loadJobHistory(sdk, 'Demo', [100], 30)
 
-    expect(usage.totalSec).toBe(900)
+    expect(usage).toEqual([{ folderId: 100, runtimeType: 'Unattended', robotId: 1, sec: 900 }])
   })
 
-  it('counts only Unattended and Serverless runs as robot time', async () => {
-    fetchAllPages.mockResolvedValue([
-      job('Successful', '2026-10-01T10:00:00Z', 10, 1, 'Unattended'),
-      job('Successful', '2026-10-01T11:00:00Z', 20, 1, 'Serverless'),
-      job('Successful', '2026-10-01T12:00:00Z', 30, 1, 'Development'),
-      job('Successful', '2026-10-01T13:00:00Z', 40, 1, 'Attended'),
-      { ...job('Successful', '2026-10-01T14:00:00Z', 50), RuntimeType: null },
-    ])
-
-    const { usage, rows } = await loadJobHistory(sdk, 'Demo', [100], 30)
-
-    expect(usage.totalSec).toBe(1800)
-    expect(usage.byRobot.get(1)).toBe(1800)
-    // Runtime stats still use every successful run, whatever it ran on.
-    expect(rows).toHaveLength(5)
-  })
-
-  it('counts a job with no robot in the total and its folder only', async () => {
+  it('records a job with no robot under a null robot id', async () => {
     fetchAllPages.mockResolvedValue([job('Successful', '2026-10-01T10:00:00Z', 10, null)])
 
     const { usage } = await loadJobHistory(sdk, 'Demo', [100], 30)
 
-    expect(usage.totalSec).toBe(600)
-    expect(usage.byFolder.get(100)).toBe(600)
-    expect(usage.byRobot.size).toBe(0)
+    expect(usage).toEqual([{ folderId: 100, runtimeType: 'Unattended', robotId: null, sec: 600 }])
   })
 
   it('keeps folder attribution aligned when an earlier folder fails', async () => {
@@ -111,7 +120,6 @@ describe('loadJobHistory usage', () => {
 
     const { usage } = await loadJobHistory(sdk, 'Demo', [100, 200], 30)
 
-    expect(usage.byFolder.has(100)).toBe(false)
-    expect(usage.byFolder.get(200)).toBe(1200)
+    expect(usage).toEqual([{ folderId: 200, runtimeType: 'Unattended', robotId: 1, sec: 1200 }])
   })
 })

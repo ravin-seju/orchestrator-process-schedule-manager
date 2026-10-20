@@ -1,6 +1,7 @@
 import type { Folder, LoadSchedulesResult, ProcessSchedule, TenantInfo } from './orchestrator'
 import type { RuntimeStats, StressScheduleCount } from './types'
-import type { RobotUsage } from '@/features/jobs/orchestrator'
+import type { UsageEntry } from '@/features/jobs/orchestrator'
+import type { FolderRuntimeEntry } from '@/features/machines/orchestrator'
 
 export const stressScheduleCounts = [5, 10, 50, 100] as const
 export const defaultStressScheduleCount: StressScheduleCount = 5
@@ -232,23 +233,28 @@ const buildStressRuntimeStats = (): Map<number, RuntimeStats> => {
 
 export const stressRuntimeStats = buildStressRuntimeStats()
 
-// Utilization fixtures: 10 deployed runtimes over 30 days = 7,200 h of capacity.
-// 2,952 h consumed (41%), skewed toward Bot.Alpha; Bot.Delta ran nothing in the window.
+// Utilization fixtures. Capacity: Finance Ops has the most counted runtimes (8 Unattended +
+// 2 Testing = 10), so 10 x 24 h x 30 days = 7,200 h. Consumed: 2,952 h on counted types (41%),
+// skewed toward Bot.Alpha. Bot.Delta only ran Development jobs, which aren't counted, so it shows in
+// the By runtime type table but not the robot table.
 const hours = (h: number) => h * 3600
-export const stressCapacityRuntimes = 10
-export const stressRobotUsage: RobotUsage = {
-  totalSec: hours(2952),
-  byRobot: new Map([
-    [201, hours(1830)],
-    [202, hours(738)],
-    [203, hours(384)],
-  ]),
-  byFolder: new Map([
-    [8102, hours(1328)],
-    [8104, hours(974)],
-    [8101, hours(650)],
-  ]),
-}
+export const stressFolderRuntimes: FolderRuntimeEntry[] = [
+  { folderId: 8102, runtimeType: 'Unattended', total: 8 },
+  { folderId: 8102, runtimeType: 'TestAutomation', total: 2 },
+  { folderId: 8104, runtimeType: 'Unattended', total: 6 },
+  { folderId: 8104, runtimeType: 'Serverless', total: 3 },
+  { folderId: 8101, runtimeType: 'Unattended', total: 4 },
+  { folderId: 8101, runtimeType: 'Development', total: 2 },
+]
+export const stressUsage: UsageEntry[] = [
+  { folderId: 8102, runtimeType: 'Unattended', robotId: 201, sec: hours(1180) },
+  { folderId: 8102, runtimeType: 'Unattended', robotId: 202, sec: hours(148) },
+  { folderId: 8104, runtimeType: 'Serverless', robotId: 201, sec: hours(650) },
+  { folderId: 8104, runtimeType: 'Unattended', robotId: 202, sec: hours(324) },
+  { folderId: 8101, runtimeType: 'TestAutomation', robotId: 202, sec: hours(266) },
+  { folderId: 8101, runtimeType: 'Unattended', robotId: 203, sec: hours(384) },
+  { folderId: 8101, runtimeType: 'Development', robotId: 204, sec: hours(12) },
+]
 
 const buildProcessSchedule = (
   bucket: StressBucket,

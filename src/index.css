@@ -2635,6 +2635,15 @@ h3 {
   height: 100%;
 }
 
+/* The calculation tooltips run to two or three sentences. */
+.ui-tooltip-content.utilization-hint {
+  max-width: 360px;
+}
+
+.inventory-table tr[data-counted='false'] td {
+  color: var(--text-muted);
+}
+
 .inventory-table .utilization-empty {
   color: var(--text-muted);
   text-align: center;

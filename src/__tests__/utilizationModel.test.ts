@@ -1,95 +1,157 @@
 import { describe, expect, it } from 'vitest'
-import type { RobotUsage } from '@/features/jobs/orchestrator'
+import type { UsageEntry } from '@/features/jobs/orchestrator'
+import type { FolderRuntimeEntry } from '@/features/machines/orchestrator'
 import { buildUtilizationModel, utilizationTone, type UtilizationInput } from '@/features/utilization/model'
 
 const hours = (h: number) => h * 3600
 
-const usage = (byRobot: [number, number][], byFolder: [number, number][] = []): RobotUsage => ({
-  totalSec: byRobot.reduce((sum, [, sec]) => sum + sec, 0),
-  byRobot: new Map(byRobot),
-  byFolder: new Map(byFolder),
+const usageOf = (folderId: number, runtimeType: string | null, robotId: number | null, h: number): UsageEntry => ({
+  folderId,
+  runtimeType,
+  robotId,
+  sec: hours(h),
 })
 
+const rt = (folderId: number, runtimeType: string, total: number): FolderRuntimeEntry => ({ folderId, runtimeType, total })
+
 const input = (overrides: Partial<UtilizationInput> = {}): UtilizationInput => ({
-  capacityRuntimes: 10,
-  usage: usage([[1, hours(1800)], [2, hours(1080)]], [[100, hours(2160)], [200, hours(720)]]),
+  folderRuntimes: [rt(100, 'Unattended', 8), rt(100, 'TestAutomation', 2), rt(200, 'Unattended', 6)],
+  usage: [usageOf(100, 'Unattended', 1, 1800), usageOf(200, 'Unattended', 2, 720), usageOf(200, 'Serverless', 2, 360)],
+  excludedFolderIds: new Set(),
   sinceDays: 30,
   robotNames: new Map([[1, 'Bot.Alpha'], [2, 'Bot.Beta']]),
   folderNames: new Map([[100, 'Finance'], [200, 'Shared']]),
   ...overrides,
 })
 
-describe('buildUtilizationModel', () => {
-  it('turns deployed runtimes into robot-hours of capacity', () => {
+describe('buildUtilizationModel capacity', () => {
+  it('adds up counted runtime types per folder and takes the largest folder', () => {
     const model = buildUtilizationModel(input())
     expect(model.source).toBe('runtimes')
     expect(model.capacityRuntimes).toBe(10)
+    expect(model.capacityFolderName).toBe('Finance')
     expect(model.capacityHours).toBe(7200)
-    expect(model.consumedHours).toBe(2880)
-    expect(model.idleHours).toBe(4320)
-    expect(model.utilizationPct).toBeCloseTo(40)
-    expect(model.displayPct).toBeCloseTo(40)
   })
 
-  it('treats zero runtimes as unknown capacity rather than zero', () => {
-    const model = buildUtilizationModel(input({ capacityRuntimes: 0 }))
+  it('counts production and testing types but not development or agentic ones', () => {
+    const model = buildUtilizationModel(
+      input({
+        folderRuntimes: [
+          rt(100, 'Unattended', 2),
+          rt(100, 'AutomationCloud', 1),
+          rt(100, 'NonProduction', 1),
+          rt(100, 'Development', 5),
+          rt(100, 'AgentService', 4),
+          rt(100, 'Headless', 3),
+        ],
+      }),
+    )
+    expect(model.capacityRuntimes).toBe(4)
+  })
+
+  it('leaves excluded folders out of capacity', () => {
+    const model = buildUtilizationModel(input({ excludedFolderIds: new Set([100]) }))
+    expect(model.capacityRuntimes).toBe(6)
+    expect(model.capacityFolderName).toBe('Shared')
+  })
+
+  it('has no capacity when no folder reports a counted runtime', () => {
+    const model = buildUtilizationModel(input({ folderRuntimes: [rt(100, 'Development', 3)] }))
     expect(model.source).toBeNull()
     expect(model.capacityRuntimes).toBeNull()
-  })
-
-  it('shows consumed hours only when capacity is unknown', () => {
-    const model = buildUtilizationModel(input({ capacityRuntimes: null }))
-    expect(model.source).toBeNull()
     expect(model.capacityHours).toBeNull()
     expect(model.idleHours).toBeNull()
     expect(model.utilizationPct).toBeNull()
     expect(model.displayPct).toBeNull()
     expect(model.consumedHours).toBe(2880)
-    expect(model.robots).toHaveLength(2)
-    expect(model.folders).toHaveLength(2)
+  })
+})
+
+describe('buildUtilizationModel consumed', () => {
+  it('sums counted job time and works out utilization and idle hours', () => {
+    const model = buildUtilizationModel(input())
+    expect(model.consumedHours).toBe(2880)
+    expect(model.idleHours).toBe(4320)
+    expect(model.utilizationPct).toBeCloseTo(40)
+    expect(model.displayPct).toBeCloseTo(40)
+    expect(model.consumedFolderCount).toBe(2)
+  })
+
+  it('leaves out jobs on uncounted runtime types', () => {
+    const model = buildUtilizationModel(
+      input({ usage: [usageOf(100, 'Unattended', 1, 100), usageOf(100, 'Development', 1, 50), usageOf(100, null, 1, 25)] }),
+    )
+    expect(model.consumedHours).toBe(100)
+    expect(model.robots).toEqual([{ id: 1, name: 'Bot.Alpha', hours: 100, sharePct: 100 }])
+  })
+
+  it('leaves out personal workspaces and reports what was left out', () => {
+    const model = buildUtilizationModel(
+      input({
+        usage: [usageOf(100, 'Unattended', 1, 100), usageOf(300, 'Serverless', 9, 4), usageOf(300, 'Development', 9, 2)],
+        excludedFolderIds: new Set([300]),
+        robotNames: new Map([[1, 'Bot.Alpha'], [9, 'someone-attended']]),
+      }),
+    )
+    expect(model.consumedHours).toBe(100)
+    expect(model.excludedHours).toBe(6)
+    expect(model.robots.map((r) => r.name)).toEqual(['Bot.Alpha'])
+    expect(model.folders.map((f) => f.id)).toEqual([100])
   })
 
   it('clamps the display value above 100% but keeps the raw ratio', () => {
     // 1 runtime x 24 h x 30 days = 720 h against 2,880 h consumed: the lower bound was too low.
-    const model = buildUtilizationModel(input({ capacityRuntimes: 1 }))
+    const model = buildUtilizationModel(input({ folderRuntimes: [rt(100, 'Unattended', 1)] }))
     expect(model.utilizationPct).toBeCloseTo(400)
     expect(model.displayPct).toBe(100)
     expect(model.idleHours).toBe(0)
   })
 
-  it('sorts robots by hours and gives each a share of consumed time', () => {
-    const model = buildUtilizationModel(input())
-    expect(model.robots.map((r) => r.name)).toEqual(['Bot.Alpha', 'Bot.Beta'])
-    expect(model.robots[0].hours).toBe(1800)
-    expect(model.robots[0].sharePct).toBeCloseTo(62.5)
-    expect(model.robots[1].sharePct).toBeCloseTo(37.5)
+  it('returns zero shares instead of dividing by zero when nothing ran', () => {
+    const model = buildUtilizationModel(input({ usage: [] }))
+    expect(model.consumedHours).toBe(0)
+    expect(model.utilizationPct).toBe(0)
+    expect(model.robots).toEqual([])
+    expect(model.folders).toEqual([])
+  })
+})
+
+describe('buildUtilizationModel tables', () => {
+  it('sorts robots by hours, with a share of consumed time and a fallback name', () => {
+    const model = buildUtilizationModel(input({ robotNames: new Map([[1, 'Bot.Alpha']]) }))
+    expect(model.robots).toEqual([
+      { id: 1, name: 'Bot.Alpha', hours: 1800, sharePct: 62.5 },
+      { id: 2, name: 'Robot 2', hours: 1080, sharePct: 37.5 },
+    ])
   })
 
-  it('lists a known robot that ran nothing at 0 hours', () => {
+  it('lists only robots with counted time', () => {
     const model = buildUtilizationModel(
       input({ robotNames: new Map([[1, 'Bot.Alpha'], [2, 'Bot.Beta'], [3, 'Bot.Idle']]) }),
     )
-    expect(model.robots.at(-1)).toEqual({ id: 3, name: 'Bot.Idle', hours: 0, sharePct: 0 })
-  })
-
-  it('names an unknown robot by its id', () => {
-    const model = buildUtilizationModel(input({ robotNames: new Map([[1, 'Bot.Alpha']]) }))
-    expect(model.robots.map((r) => r.name)).toEqual(['Bot.Alpha', 'Robot 2'])
+    expect(model.robots.map((r) => r.name)).toEqual(['Bot.Alpha', 'Bot.Beta'])
   })
 
   it('reports folders as a share of consumed hours, with a fallback name', () => {
     const model = buildUtilizationModel(input({ folderNames: new Map([[100, 'Finance']]) }))
     expect(model.folders).toEqual([
-      { id: 100, name: 'Finance', hours: 2160, sharePct: 75 },
-      { id: 200, name: 'Folder 200', hours: 720, sharePct: 25 },
+      { id: 100, name: 'Finance', hours: 1800, sharePct: 62.5 },
+      { id: 200, name: 'Folder 200', hours: 1080, sharePct: 37.5 },
     ])
   })
 
-  it('returns zero shares instead of dividing by zero when nothing ran', () => {
-    const model = buildUtilizationModel(input({ usage: usage([]), robotNames: new Map([[1, 'Bot.Alpha']]) }))
-    expect(model.consumedHours).toBe(0)
-    expect(model.utilizationPct).toBe(0)
-    expect(model.robots).toEqual([{ id: 1, name: 'Bot.Alpha', hours: 0, sharePct: 0 }])
+  it('breaks runtimes and hours down by type, counted types first', () => {
+    const model = buildUtilizationModel(
+      input({
+        folderRuntimes: [rt(100, 'Unattended', 8), rt(200, 'Unattended', 6), rt(100, 'Development', 2)],
+        usage: [usageOf(100, 'Unattended', 1, 300), usageOf(200, 'Serverless', 2, 50), usageOf(100, 'Development', 3, 400)],
+      }),
+    )
+    expect(model.runtimeTypes).toEqual([
+      { type: 'Unattended', label: 'Unattended (Production)', counted: true, runtimes: 8, hours: 300 },
+      { type: 'Serverless', label: 'Cloud Serverless', counted: true, runtimes: 0, hours: 50 },
+      { type: 'Development', label: 'Development', counted: false, runtimes: 2, hours: 400 },
+    ])
   })
 })
 

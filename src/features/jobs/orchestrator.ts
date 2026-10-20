@@ -33,22 +33,18 @@ export interface JobHistoryResult {
   // ReleaseId → machine keys from MANUAL runs (no StartingScheduleId). Used as a
   // fallback so manual-only schedules still show a (process-level) machine.
   releaseMachineIds: Map<number, number[]>
-  // Robot-busy seconds over the window, for the Utilization view. Counts every executed
-  // job (Successful, Faulted, Stopped) on a capacity runtime type: a faulted or stopped run
-  // still held its robot.
-  usage: RobotUsage
+  // Robot-busy seconds over the window for the Utilization view, one entry per folder, runtime
+  // type and robot. Covers every executed job (Successful, Faulted, Stopped): a faulted or stopped
+  // run still held its robot. Which types and folders count is decided by the model, not here.
+  usage: UsageEntry[]
 }
 
-export interface RobotUsage {
-  totalSec: number
-  byRobot: Map<number, number>
-  byFolder: Map<number, number>
+export interface UsageEntry {
+  folderId: number
+  runtimeType: string | null
+  robotId: number | null
+  sec: number
 }
-
-// Runtime types the Utilization view measures, on both sides: capacity counts these runtimes
-// (GetRuntimesForFolder) and consumed time counts jobs that ran on them. Development, Attended,
-// test and other runs are left out of both.
-export const CAPACITY_RUNTIME_TYPES: readonly string[] = ['Unattended', 'Serverless']
 
 // Jobs whose machine association is meaningful — the job actually executed on a host.
 // Excludes never-ran states (Pending/Running/Cancelled/etc.) to avoid phantom machines.
@@ -98,7 +94,7 @@ export async function loadJobHistory(
   const machineNames = new Map<number, string>()
   const scheduleMachineSets = new Map<number, Set<number>>()
   const releaseMachineSets = new Map<number, Set<number>>()
-  const usage: RobotUsage = { totalSec: 0, byRobot: new Map(), byFolder: new Map() }
+  const usageByKey = new Map<string, UsageEntry>()
   // settledBatch keeps input order, so settled[i] holds folderIds[i]'s jobs.
   for (const [index, result] of settled.entries()) {
     if (result.status !== 'fulfilled') continue
@@ -130,14 +126,13 @@ export async function loadJobHistory(
       if (start == null || end == null) continue
       const durationSec = (end - start) / 1000
       if (durationSec <= 0) continue
-      if (job.RuntimeType && CAPACITY_RUNTIME_TYPES.includes(job.RuntimeType)) {
-        usage.totalSec += durationSec
-        if (job.Robot?.Id != null) {
-          usage.byRobot.set(job.Robot.Id, (usage.byRobot.get(job.Robot.Id) ?? 0) + durationSec)
-        }
-        if (folderId != null) {
-          usage.byFolder.set(folderId, (usage.byFolder.get(folderId) ?? 0) + durationSec)
-        }
+      if (folderId != null) {
+        const runtimeType = job.RuntimeType ?? null
+        const robotId = job.Robot?.Id ?? null
+        const key = `${folderId}|${runtimeType}|${robotId}`
+        const entry = usageByKey.get(key)
+        if (entry) entry.sec += durationSec
+        else usageByKey.set(key, { folderId, runtimeType, robotId, sec: durationSec })
       }
       // Duration stats use ONLY successful jobs (faulted/stopped runs would skew median/p90).
       if (job.State !== 'Successful') continue
@@ -157,7 +152,7 @@ export async function loadJobHistory(
     releaseMachineIds.set(releaseId, [...set])
   }
 
-  return { rows, robotNames, machineNames, scheduleMachineIds, releaseMachineIds, usage }
+  return { rows, robotNames, machineNames, scheduleMachineIds, releaseMachineIds, usage: [...usageByKey.values()] }
 }
 
 export function aggregateRuntimes(rows: DurationRow[]): Map<number, RuntimeStats> {

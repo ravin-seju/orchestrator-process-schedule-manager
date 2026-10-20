@@ -238,23 +238,33 @@ function Dashboard({
     usage,
     isLoading: isJobHistoryLoading,
   } = useJobRuntimes(sdk, runtimeTenant, runtimeFolderIds.length ? runtimeFolderIds : undefined, utilizationSinceDays)
-  const { capacityRuntimes, isLoading: isCapacityLoading } = useFolderRuntimes(
+  // Personal workspaces run people's own robots, not the shared fleet, so Utilization leaves them out.
+  const personalFolderIds = useMemo(
+    () => new Set(folders.filter((folder) => folder.FolderType === 'Personal').map((folder) => folder.Id)),
+    [folders],
+  )
+  const capacityFolderIds = useMemo(
+    () => runtimeFolderIds.filter((id) => !personalFolderIds.has(id)),
+    [runtimeFolderIds, personalFolderIds],
+  )
+  const { folderRuntimes, isLoading: isCapacityLoading } = useFolderRuntimes(
     sdk,
     runtimeTenant,
-    hasOpenedUtilization && runtimeFolderIds.length ? runtimeFolderIds : undefined,
+    hasOpenedUtilization && capacityFolderIds.length ? capacityFolderIds : undefined,
   )
   const utilizationModel = useMemo(
     () =>
       buildUtilizationModel({
-        capacityRuntimes,
+        folderRuntimes,
         usage,
+        excludedFolderIds: personalFolderIds,
         sinceDays: utilizationSinceDays,
         robotNames,
         folderNames: new Map(
           folders.map((folder) => [folder.Id, folder.FullyQualifiedName || folder.DisplayName || `Folder ${folder.Id}`]),
         ),
       }),
-    [capacityRuntimes, usage, robotNames, folders],
+    [folderRuntimes, usage, personalFolderIds, robotNames, folders],
   )
   // Effective machine-per-schedule: direct scheduled-job machines, with release (manual-run)
   // machines as a fallback only for schedules that have no direct association.

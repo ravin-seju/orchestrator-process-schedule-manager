@@ -27,26 +27,19 @@ beforeEach(() => {
 })
 
 describe('loadFolderRuntimes', () => {
-  it('uses the largest folder total, not the sum, as capacity', async () => {
+  it('returns one entry per folder and runtime type with deployed runtimes', async () => {
     byFolder({
-      100: runtimes([['Unattended', 11]]),
+      100: runtimes([['Unattended', 11], ['Development', 2], ['Serverless', 0]]),
       200: runtimes([['Unattended', 6]]),
     })
 
-    const result = await loadFolderRuntimes(sdk, 'Demo', [100, 200])
+    const entries = await loadFolderRuntimes(sdk, 'Demo', [100, 200])
 
-    expect(result.capacityRuntimes).toBe(11)
-    expect(result.folderRuntimes).toEqual(new Map([[100, 11], [200, 6]]))
-  })
-
-  it('counts Unattended and Serverless runtimes only', async () => {
-    byFolder({
-      100: runtimes([['Unattended', 3], ['Serverless', 2], ['Development', 5], ['TestAutomation', 4]]),
-    })
-
-    const result = await loadFolderRuntimes(sdk, 'Demo', [100])
-
-    expect(result.capacityRuntimes).toBe(5)
+    expect(entries).toEqual([
+      { folderId: 100, runtimeType: 'Unattended', total: 11 },
+      { folderId: 100, runtimeType: 'Development', total: 2 },
+      { folderId: 200, runtimeType: 'Unattended', total: 6 },
+    ])
   })
 
   it('asks for each folder by path, with no folder header', async () => {
@@ -67,25 +60,14 @@ describe('loadFolderRuntimes', () => {
       200: runtimes([['Unattended', 4]]),
     })
 
-    const result = await loadFolderRuntimes(sdk, 'Demo', [100, 200])
+    const entries = await loadFolderRuntimes(sdk, 'Demo', [100, 200])
 
-    expect(result.capacityRuntimes).toBe(4)
-    expect(result.folderRuntimes).toEqual(new Map([[200, 4]]))
+    expect(entries).toEqual([{ folderId: 200, runtimeType: 'Unattended', total: 4 }])
   })
 
-  it('returns null capacity when every folder fails', async () => {
+  it('returns nothing when every folder fails', async () => {
     byFolder({ 100: new Error('403'), 200: new Error('403') })
 
-    const result = await loadFolderRuntimes(sdk, 'Demo', [100, 200])
-
-    expect(result.capacityRuntimes).toBeNull()
-  })
-
-  it('returns null capacity when no folder has a capacity runtime', async () => {
-    byFolder({ 100: runtimes([['Unattended', 0], ['Development', 2]]) })
-
-    const result = await loadFolderRuntimes(sdk, 'Demo', [100])
-
-    expect(result.capacityRuntimes).toBeNull()
+    expect(await loadFolderRuntimes(sdk, 'Demo', [100, 200])).toEqual([])
   })
 })

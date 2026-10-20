@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v7'
+const CACHE_VERSION = 'v8'
 const NS = `process-schedule-manager.cache.${CACHE_VERSION}`
 
 // Soft TTL → data is served but flagged stale (triggers background revalidation).

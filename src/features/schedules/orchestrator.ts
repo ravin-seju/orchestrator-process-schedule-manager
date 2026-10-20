@@ -6,7 +6,9 @@ export interface Folder {
   Key?: string
   DisplayName?: string
   FullyQualifiedName?: string
-  IsPersonal?: boolean
+  // 'Personal' marks a personal workspace. IsPersonal can't be used instead: these tenants reject
+  // it in $select with 400 "Could not find a property named 'IsPersonal'".
+  FolderType?: 'Standard' | 'Personal' | 'Virtual' | 'Solution' | 'DebugSolution'
 }
 
 export interface ProcessSchedule {
@@ -180,7 +182,7 @@ export async function loadProcessSchedules(
   const folders = await fetchAllPages<Folder>(
     sdk,
     selectedTenant.name,
-    'Folders?$select=Id,Key,DisplayName,FullyQualifiedName&$orderby=FullyQualifiedName&$top=1000',
+    'Folders?$select=Id,Key,DisplayName,FullyQualifiedName,FolderType&$orderby=FullyQualifiedName&$top=1000',
   ).catch((err) => {
     // A 404 on the tenant-root Folders call means the tenant doesn't exist / isn't reachable —
     // Orchestrator returns "Service: orchestrator not found ... Tenant: X". Surface a clear

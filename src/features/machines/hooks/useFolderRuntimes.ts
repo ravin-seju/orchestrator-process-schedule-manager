@@ -1,24 +1,24 @@
 import { useEffect, useState } from 'react'
 import type { UiPath } from '@uipath/uipath-typescript/core'
-import { loadFolderRuntimes } from '../orchestrator'
+import { loadFolderRuntimes, type FolderRuntimeEntry } from '../orchestrator'
 import { isTestingPath } from '@/features/schedules/calendarDisplay'
 import { cacheGetEntry, cacheSet, cacheKey } from '@/features/orchestrator/cache'
 
 const FOLDER_RUNTIMES_TTL_MS = 4 * 60 * 60 * 1000
 
 type CachedFolderRuntimes = {
-  capacityRuntimes: number | null
+  entries: FolderRuntimeEntry[]
   folderKey: string
 }
 
 const testingRouteEnabled = import.meta.env.VITE_ENABLE_TESTING_ROUTE === 'true'
 const loadStressData = testingRouteEnabled ? () => import('@/features/schedules/stressData') : null
 
-// Capacity for the Utilization view. Mirrors useJobRuntimes: cached per tenant and folder set,
-// a stale entry is shown while it refreshes, and any failure leaves capacity unknown (null)
-// rather than surfacing an error, so the view falls back to consumed hours only.
+// Deployed runtimes for the Utilization view. Mirrors useJobRuntimes: cached per tenant and folder
+// set, a stale entry is shown while it refreshes, and a failure leaves the list empty rather than
+// surfacing an error, so the view falls back to consumed hours only.
 export function useFolderRuntimes(sdk?: UiPath | null, tenantName?: string, folderIds?: number[]) {
-  const [capacityRuntimes, setCapacityRuntimes] = useState<number | null>(null)
+  const [folderRuntimes, setFolderRuntimes] = useState<FolderRuntimeEntry[]>([])
   const [isLoading, setIsLoading] = useState(false)
 
   const folderKey = folderIds?.join(',') ?? ''
@@ -27,7 +27,7 @@ export function useFolderRuntimes(sdk?: UiPath | null, tenantName?: string, fold
     if (loadStressData && typeof window !== 'undefined' && isTestingPath(window.location.pathname)) {
       let isActive = true
       loadStressData().then((m) => {
-        if (isActive) setCapacityRuntimes(m.stressCapacityRuntimes)
+        if (isActive) setFolderRuntimes(m.stressFolderRuntimes)
       })
       return () => { isActive = false }
     }
@@ -45,14 +45,14 @@ export function useFolderRuntimes(sdk?: UiPath | null, tenantName?: string, fold
       const cached = cacheGetEntry<CachedFolderRuntimes>(key)
 
       const revalidate = async () => {
-        const result = await loadFolderRuntimes(sdk, tenantName, folderIds)
+        const entries = await loadFolderRuntimes(sdk, tenantName, folderIds)
         if (!isActive) return
-        cacheSet(key, { capacityRuntimes: result.capacityRuntimes, folderKey: sortedFolderKey }, FOLDER_RUNTIMES_TTL_MS)
-        setCapacityRuntimes(result.capacityRuntimes)
+        cacheSet(key, { entries, folderKey: sortedFolderKey }, FOLDER_RUNTIMES_TTL_MS)
+        setFolderRuntimes(entries)
       }
 
       if (cached && cached.data.folderKey === sortedFolderKey) {
-        setCapacityRuntimes(cached.data.capacityRuntimes)
+        setFolderRuntimes(cached.data.entries)
         if (cached.isStale) {
           revalidate().catch((err) => console.warn('Background folder runtime refresh failed:', err))
         }
@@ -78,5 +78,5 @@ export function useFolderRuntimes(sdk?: UiPath | null, tenantName?: string, fold
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sdk, tenantName, folderKey])
 
-  return { capacityRuntimes, isLoading }
+  return { folderRuntimes, isLoading }
 }

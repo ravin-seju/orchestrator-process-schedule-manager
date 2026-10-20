@@ -2,7 +2,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { Gauge } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatNumber } from '@/features/schedules/formatters'
-import { utilizationTone, type UtilizationModel, type UtilizationRow } from '../model'
+import { utilizationTone, type RuntimeTypeRow, type UtilizationModel, type UtilizationRow } from '../model'
 
 const formatHours = (hours: number) =>
   hours > 0 && hours < 10 ? `${hours.toFixed(1)} h` : `${formatNumber(Math.round(hours))} h`
@@ -11,22 +11,22 @@ const formatPct = (pct: number) => `${Math.round(pct)}%`
 
 const toneColor = { low: 'var(--teal)', medium: 'var(--orange)', high: 'var(--danger)' } as const
 
-function Tile({ label, value, tone, hint }: { label: string; value: string; tone?: string; hint?: ReactNode }) {
-  const tile = (
-    <div
-      className="header-metric-item"
-      style={tone ? ({ '--tile-tone': tone } as CSSProperties) : undefined}
-      tabIndex={hint ? 0 : undefined}
-    >
-      <strong>{value}</strong>
-      <small>{label}</small>
-    </div>
-  )
-  if (!hint) return tile
+const COUNTED_TYPES_TEXT = 'production and testing runtimes (Unattended, Cloud VM, Cloud Serverless, Non-production and the Testing types)'
+
+function Tile({ label, value, tone, hint }: { label: string; value: string; tone?: string; hint: ReactNode }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{tile}</TooltipTrigger>
-      <TooltipContent>{hint}</TooltipContent>
+      <TooltipTrigger asChild>
+        <div
+          className="header-metric-item"
+          style={tone ? ({ '--tile-tone': tone } as CSSProperties) : undefined}
+          tabIndex={0}
+        >
+          <strong>{value}</strong>
+          <small>{label}</small>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent className="utilization-hint">{hint}</TooltipContent>
     </Tooltip>
   )
 }
@@ -49,9 +49,9 @@ function SourceBadge({ model, isLoading }: { model: UtilizationModel; isLoading:
             Capacity unavailable
           </span>
         </TooltipTrigger>
-        <TooltipContent>
-          No folder reported deployed Unattended or Serverless runtimes, so there is no capacity to compare against.
-          Consumed hours are still shown.
+        <TooltipContent className="utilization-hint">
+          No folder reported deployed {COUNTED_TYPES_TEXT}, so there is no capacity to compare against. Consumed hours
+          are still shown.
         </TooltipContent>
       </Tooltip>
     )
@@ -64,8 +64,9 @@ function SourceBadge({ model, isLoading }: { model: UtilizationModel; isLoading:
           At least {formatNumber(runtimes)} {runtimes === 1 ? 'runtime' : 'runtimes'}
         </span>
       </TooltipTrigger>
-      <TooltipContent>
-        The most Unattended and Serverless runtimes deployed to any one folder. Folder totals are not added together,
+      <TooltipContent className="utilization-hint">
+        The most {COUNTED_TYPES_TEXT} deployed to any one folder
+        {model.capacityFolderName ? ` (${model.capacityFolderName})` : ''}. Folder totals are not added together,
         because a machine shared by several folders appears in each of them, so the real capacity can be higher.
       </TooltipContent>
     </Tooltip>
@@ -137,6 +138,50 @@ function UsageTable({
   )
 }
 
+function RuntimeTypeTable({ rows, emptyText }: { rows: RuntimeTypeRow[]; emptyText: string }) {
+  return (
+    <div className="utilization-table-block">
+      <h3>By runtime type</h3>
+      <div className="utilization-table-scroll">
+        <table className="inventory-table utilization-table">
+          <colgroup>
+            <col style={{ width: '40%' }} />
+            <col style={{ width: '20%' }} />
+            <col style={{ width: '20%' }} />
+            <col style={{ width: '20%' }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col">Runtime type</th>
+              <th scope="col">Runtimes</th>
+              <th scope="col">Hours</th>
+              <th scope="col">In headline</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td className="utilization-empty" colSpan={4}>
+                  {emptyText}
+                </td>
+              </tr>
+            ) : (
+              rows.map((row) => (
+                <tr key={row.type ?? 'unknown'} data-counted={row.counted}>
+                  <td>{row.label}</td>
+                  <td className="table-number">{row.runtimes > 0 ? formatNumber(row.runtimes) : '—'}</td>
+                  <td className="table-number">{row.hours > 0 ? formatHours(row.hours) : '—'}</td>
+                  <td>{row.counted ? 'Yes' : 'No'}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export function UtilizationView({
   model,
   sinceDays,
@@ -149,9 +194,10 @@ export function UtilizationView({
   isCapacityLoading: boolean
 }) {
   const tone = model.displayPct != null ? utilizationTone(model.displayPct) : null
-  const emptyText = isLoading
-    ? 'Loading job history…'
-    : `No Unattended or Serverless jobs ran in the last ${sinceDays} days.`
+  const emptyText = isLoading ? 'Loading job history…' : `No production or testing jobs ran in the last ${sinceDays} days.`
+  const consumed = formatHours(model.consumedHours)
+  const capacity = model.capacityHours != null ? formatHours(model.capacityHours) : null
+  const folderCount = `${formatNumber(model.consumedFolderCount)} ${model.consumedFolderCount === 1 ? 'folder' : 'folders'}`
 
   return (
     <section className="utilization-view" aria-label="Robot utilization">
@@ -166,23 +212,63 @@ export function UtilizationView({
         </header>
 
         <div className="header-metric-stats utilization-tiles">
-          {model.utilizationPct != null && model.displayPct != null && tone ? (
+          {model.utilizationPct != null && model.displayPct != null && tone && capacity ? (
             <Tile
               label="Utilization"
               value={formatPct(model.displayPct)}
               tone={toneColor[tone]}
               hint={
-                model.utilizationPct > 100
-                  ? `Raw ${formatPct(model.utilizationPct)}: more hours were used than the capacity floor allows, so real capacity is higher than shown.`
-                  : `Raw ${model.utilizationPct.toFixed(1)}% of capacity.`
+                <>
+                  {consumed} consumed ÷ {capacity} capacity = {model.utilizationPct.toFixed(1)}%.
+                  {model.utilizationPct > 100
+                    ? ' Shown as 100%: capacity is a lower bound, so the real capacity is higher than shown.'
+                    : null}
+                </>
               }
             />
           ) : null}
-          {model.capacityHours != null ? (
-            <Tile label="Capacity" value={formatHours(model.capacityHours)} tone="var(--metric-utilization)" />
+          {model.capacityHours != null && model.capacityRuntimes != null && capacity ? (
+            <Tile
+              label="Capacity"
+              value={capacity}
+              tone="var(--metric-utilization)"
+              hint={
+                <>
+                  {formatNumber(model.capacityRuntimes)} runtimes × 24 h × {sinceDays} days = {capacity}. The{' '}
+                  {formatNumber(model.capacityRuntimes)} is the most {COUNTED_TYPES_TEXT} deployed to any one folder
+                  {model.capacityFolderName ? ` (${model.capacityFolderName})` : ''}.
+                </>
+              }
+            />
           ) : null}
-          <Tile label="Consumed" value={formatHours(model.consumedHours)} tone="var(--metric-runs)" />
-          {model.idleHours != null ? <Tile label="Idle" value={formatHours(model.idleHours)} /> : null}
+          <Tile
+            label="Consumed"
+            value={consumed}
+            tone="var(--metric-runs)"
+            hint={
+              <>
+                Sum of job durations (end − start) over the last {sinceDays} days for jobs on {COUNTED_TYPES_TEXT} that
+                ended Successful, Faulted or Stopped, across {folderCount} = {consumed}.
+                {model.excludedHours > 0
+                  ? ` ${formatHours(model.excludedHours)} in personal workspaces is left out.`
+                  : null}
+              </>
+            }
+          />
+          {model.idleHours != null && capacity ? (
+            <Tile
+              label="Idle"
+              value={formatHours(model.idleHours)}
+              hint={
+                <>
+                  {capacity} capacity − {consumed} consumed = {formatHours(model.idleHours)}
+                  {model.consumedHours > (model.capacityHours ?? 0)
+                    ? '. Consumed is above the capacity floor, so idle shows as 0 h.'
+                    : '.'}
+                </>
+              }
+            />
+          ) : null}
         </div>
 
         {model.displayPct != null && tone ? (
@@ -213,8 +299,8 @@ export function UtilizationView({
         ) : null}
 
         <p className="utilization-caveat">
-          Consumed counts Unattended and Serverless job time, including faulted and stopped runs, in folders that have
-          at least one trigger.
+          Consumed counts job time on {COUNTED_TYPES_TEXT}, including faulted and stopped runs, in folders that have at
+          least one trigger. Personal workspaces are left out.
         </p>
 
         <div className="utilization-tables">
@@ -238,6 +324,14 @@ export function UtilizationView({
               them more than once.
             </p>
           </div>
+        </div>
+
+        <div className="utilization-table-column">
+          <RuntimeTypeTable emptyText={emptyText} rows={model.runtimeTypes} />
+          <p className="utilization-caveat">
+            Runtimes is the most of that type deployed to any one folder. Types marked No are shown for reference and are
+            not in the headline.
+          </p>
         </div>
       </div>
     </section>

@@ -1,8 +1,10 @@
-import type { RobotUsage } from '@/features/jobs/orchestrator'
+import type { UsageEntry } from '@/features/jobs/orchestrator'
+import type { FolderRuntimeEntry } from '@/features/machines/orchestrator'
+import { isCountedRuntimeType, runtimeTypeLabel } from '@/features/orchestrator/runtimeTypes'
 
-// Where the capacity number comes from. 'runtimes' = deployed Unattended/Serverless runtimes,
-// a lower bound (largest single-folder total, see loadFolderRuntimes); null = unknown, so only
-// consumed hours can be shown. Licensed counts are out of reach: those endpoints answer 403.
+// Where the capacity number comes from. 'runtimes' = deployed runtimes of the counted types, a
+// lower bound (largest single-folder total); null = unknown, so only consumed hours can be shown.
+// Licensed counts are out of reach: those endpoints answer 403 for this app's users.
 export type CapacitySource = 'runtimes' | null
 
 export interface UtilizationRow {
@@ -12,11 +14,24 @@ export interface UtilizationRow {
   sharePct: number
 }
 
+export interface RuntimeTypeRow {
+  type: string | null
+  label: string
+  counted: boolean
+  // Largest single-folder total for this type, as for the headline capacity.
+  runtimes: number
+  hours: number
+}
+
 export interface UtilizationModel {
   source: CapacitySource
   capacityRuntimes: number | null
+  capacityFolderName: string | null
   capacityHours: number | null
   consumedHours: number
+  consumedFolderCount: number
+  // Job time in excluded (personal workspace) folders, of any runtime type, left out of everything.
+  excludedHours: number
   idleHours: number | null
   // Raw ratio; it can pass 100 because the capacity is a lower bound.
   utilizationPct: number | null
@@ -24,17 +39,22 @@ export interface UtilizationModel {
   displayPct: number | null
   robots: UtilizationRow[]
   folders: UtilizationRow[]
+  runtimeTypes: RuntimeTypeRow[]
 }
 
 export interface UtilizationInput {
-  capacityRuntimes: number | null
-  usage: RobotUsage
+  folderRuntimes: FolderRuntimeEntry[]
+  usage: UsageEntry[]
+  // Personal workspace folders: their robots are people's own, not the shared fleet.
+  excludedFolderIds: ReadonlySet<number>
   sinceDays: number
   robotNames: Map<number, string>
   folderNames: Map<number, string>
 }
 
 const HOURS_PER_DAY = 24
+
+const add = <K>(map: Map<K, number>, key: K, value: number) => map.set(key, (map.get(key) ?? 0) + value)
 
 const toRows = (
   secondsById: Map<number, number>,
@@ -51,36 +71,91 @@ const toRows = (
     .sort((a, b) => b.hours - a.hours || a.name.localeCompare(b.name))
 
 export function buildUtilizationModel({
-  capacityRuntimes,
+  folderRuntimes,
   usage,
+  excludedFolderIds,
   sinceDays,
   robotNames,
   folderNames,
 }: UtilizationInput): UtilizationModel {
-  const runtimes = capacityRuntimes != null && capacityRuntimes > 0 ? capacityRuntimes : null
-  const source: CapacitySource = runtimes != null ? 'runtimes' : null
-  const capacityHours = runtimes != null ? runtimes * HOURS_PER_DAY * sinceDays : null
-  const consumedHours = usage.totalSec / 3600
+  const folderName = (id: number) => folderNames.get(id) ?? `Folder ${id}`
+
+  // Capacity: per folder, add up the counted runtime types; take the largest folder. Adding the
+  // folders together would count a machine shared by several folders once per folder.
+  const countedRuntimesByFolder = new Map<number, number>()
+  const runtimesByTypeFolder = new Map<string, Map<number, number>>()
+  for (const entry of folderRuntimes) {
+    if (excludedFolderIds.has(entry.folderId)) continue
+    if (isCountedRuntimeType(entry.runtimeType)) add(countedRuntimesByFolder, entry.folderId, entry.total)
+    const byFolder = runtimesByTypeFolder.get(entry.runtimeType) ?? new Map<number, number>()
+    add(byFolder, entry.folderId, entry.total)
+    runtimesByTypeFolder.set(entry.runtimeType, byFolder)
+  }
+  let capacityRuntimes: number | null = null
+  let capacityFolderId: number | null = null
+  for (const [folderId, total] of countedRuntimesByFolder) {
+    if (total > 0 && (capacityRuntimes == null || total > capacityRuntimes)) {
+      capacityRuntimes = total
+      capacityFolderId = folderId
+    }
+  }
+
+  // Consumed: job time on counted runtime types, outside excluded folders.
+  let consumedSec = 0
+  let excludedSec = 0
+  const byRobot = new Map<number, number>()
+  const byFolder = new Map<number, number>()
+  const secByType = new Map<string | null, number>()
+  for (const entry of usage) {
+    if (excludedFolderIds.has(entry.folderId)) {
+      excludedSec += entry.sec
+      continue
+    }
+    add(secByType, entry.runtimeType, entry.sec)
+    if (!isCountedRuntimeType(entry.runtimeType)) continue
+    consumedSec += entry.sec
+    add(byFolder, entry.folderId, entry.sec)
+    if (entry.robotId != null) add(byRobot, entry.robotId, entry.sec)
+  }
+
+  const source: CapacitySource = capacityRuntimes != null ? 'runtimes' : null
+  const capacityHours = capacityRuntimes != null ? capacityRuntimes * HOURS_PER_DAY * sinceDays : null
+  const consumedHours = consumedSec / 3600
   const utilizationPct = capacityHours ? (consumedHours / capacityHours) * 100 : null
 
-  // A robot that ran nothing in the window still belongs in the table, at 0 h.
-  const robotSeconds = new Map(usage.byRobot)
-  for (const id of robotNames.keys()) {
-    if (!robotSeconds.has(id)) robotSeconds.set(id, 0)
-  }
+  const types = new Set<string | null>([...secByType.keys(), ...runtimesByTypeFolder.keys()])
+  const runtimeTypes: RuntimeTypeRow[] = [...types]
+    .map((type) => ({
+      type,
+      label: runtimeTypeLabel(type),
+      counted: isCountedRuntimeType(type),
+      runtimes: type != null ? Math.max(0, ...(runtimesByTypeFolder.get(type)?.values() ?? [])) : 0,
+      hours: (secByType.get(type) ?? 0) / 3600,
+    }))
+    .filter((row) => row.runtimes > 0 || row.hours > 0)
+    .sort(
+      (a, b) =>
+        Number(b.counted) - Number(a.counted) || b.hours - a.hours || b.runtimes - a.runtimes || a.label.localeCompare(b.label),
+    )
 
   return {
     source,
-    capacityRuntimes: runtimes,
+    capacityRuntimes,
+    capacityFolderName: capacityFolderId != null ? folderName(capacityFolderId) : null,
     capacityHours,
     consumedHours,
+    consumedFolderCount: byFolder.size,
+    excludedHours: excludedSec / 3600,
     idleHours: capacityHours != null ? Math.max(0, capacityHours - consumedHours) : null,
     utilizationPct,
     displayPct: utilizationPct != null ? Math.min(100, Math.max(0, utilizationPct)) : null,
-    robots: toRows(robotSeconds, usage.totalSec, (id) => robotNames.get(id) ?? `Robot ${id}`),
-    // Folders are shown as a share of consumed hours only. Machines are shared across
-    // folders, so a per-folder capacity would count the same robot-hours more than once.
-    folders: toRows(usage.byFolder, usage.totalSec, (id) => folderNames.get(id) ?? `Folder ${id}`),
+    // Only robots with counted time: a robot known only from personal, development or agentic
+    // jobs isn't part of the fleet being measured.
+    robots: toRows(byRobot, consumedSec, (id) => robotNames.get(id) ?? `Robot ${id}`),
+    // Folders are a share of consumed hours only; per-folder capacity would double-count shared
+    // machines.
+    folders: toRows(byFolder, consumedSec, folderName),
+    runtimeTypes,
   }
 }
 

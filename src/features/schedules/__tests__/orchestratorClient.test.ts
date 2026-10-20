@@ -140,7 +140,7 @@ describe('browser Orchestrator client', () => {
       await loadProcessSchedules(cloudSdk, 'DefaultTenant')
 
       expect(foldersUrl).toBe(
-        'https://api.uipath.com/customerorg/DefaultTenant/orchestrator_/odata/Folders?$select=Id,Key,DisplayName,FullyQualifiedName&$orderby=FullyQualifiedName&$top=1000',
+        'https://api.uipath.com/customerorg/DefaultTenant/orchestrator_/odata/Folders?$select=Id,Key,DisplayName,FullyQualifiedName,FolderType&$orderby=FullyQualifiedName&$top=1000',
       )
     })
 
