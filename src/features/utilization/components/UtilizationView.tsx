@@ -2,7 +2,13 @@ import type { CSSProperties, ReactNode } from 'react'
 import { Gauge } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatNumber } from '@/features/schedules/formatters'
-import { utilizationTone, type RuntimeTypeRow, type UtilizationModel, type UtilizationRow } from '../model'
+import {
+  utilizationTone,
+  type RobotRow,
+  type RootFolderRow,
+  type RuntimeTypeRow,
+  type UtilizationModel,
+} from '../model'
 
 const formatHours = (hours: number) =>
   hours > 0 && hours < 10 ? `${hours.toFixed(1)} h` : `${formatNumber(Math.round(hours))} h`
@@ -73,61 +79,117 @@ function SourceBadge({ model, isLoading }: { model: UtilizationModel; isLoading:
   )
 }
 
-function UsageTable({
-  caption,
-  nameHeading,
-  rows,
-  showBars,
-  emptyText,
-}: {
-  caption: string
-  nameHeading: string
-  rows: UtilizationRow[]
-  showBars: boolean
-  emptyText: string
-}) {
+function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {
+  return (
+    <tr>
+      <td className="utilization-empty" colSpan={colSpan}>
+        {text}
+      </td>
+    </tr>
+  )
+}
+
+function RobotRuntimeTypes({ types }: { types: RobotRow['runtimeTypes'] }) {
+  const [first, ...rest] = types
+  if (!first) return <>—</>
+  if (rest.length === 0) return <>{first.label}</>
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="utilization-type-list" tabIndex={0}>
+          <span className="utilization-type-label">{first.label}</span>
+          <span className="table-more">+{rest.length}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="utilization-hint">
+        {types.map((type) => `${type.label}: ${formatHours(type.hours)}`).join(' · ')}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+function RobotTable({ rows, emptyText }: { rows: RobotRow[]; emptyText: string }) {
   return (
     <div className="utilization-table-block">
-      <h3>{caption}</h3>
+      <h3>By robot</h3>
       <div className="utilization-table-scroll">
         <table className="inventory-table utilization-table">
           <colgroup>
-            <col style={{ width: showBars ? '44%' : '52%' }} />
-            <col style={{ width: showBars ? '20%' : '26%' }} />
-            <col style={{ width: showBars ? '36%' : '22%' }} />
+            <col style={{ width: '36%' }} />
+            <col style={{ width: '26%' }} />
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '24%' }} />
           </colgroup>
           <thead>
             <tr>
-              <th scope="col">{nameHeading}</th>
+              <th scope="col">Robot</th>
+              <th scope="col">Runtime type</th>
               <th scope="col">Hours</th>
               <th scope="col">Share</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr>
-                <td className="utilization-empty" colSpan={3}>
-                  {emptyText}
-                </td>
-              </tr>
+              <EmptyRow colSpan={4} text={emptyText} />
             ) : (
               rows.map((row) => (
                 <tr key={row.id}>
                   <td>{row.name}</td>
+                  <td>
+                    <RobotRuntimeTypes types={row.runtimeTypes} />
+                  </td>
                   <td className="table-number">{formatHours(row.hours)}</td>
                   <td>
-                    {showBars ? (
-                      <span
-                        aria-label={`${formatPct(row.sharePct)} of consumed hours`}
-                        className="utilization-share-bar"
-                        role="img"
-                      >
-                        <span style={{ width: `${Math.min(100, row.sharePct)}%` }} />
-                      </span>
-                    ) : (
-                      formatPct(row.sharePct)
-                    )}
+                    <span
+                      aria-label={`${formatPct(row.sharePct)} of consumed hours`}
+                      className="utilization-share-bar"
+                      role="img"
+                    >
+                      <span style={{ width: `${Math.min(100, row.sharePct)}%` }} />
+                    </span>
                   </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function RootFolderTable({ rows, emptyText }: { rows: RootFolderRow[]; emptyText: string }) {
+  return (
+    <div className="utilization-table-block">
+      <h3>By root folder (share of consumed)</h3>
+      <div className="utilization-table-scroll">
+        <table className="inventory-table utilization-table">
+          <colgroup>
+            <col style={{ width: '52%' }} />
+            <col style={{ width: '26%' }} />
+            <col style={{ width: '22%' }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col">Root folder</th>
+              <th scope="col">Hours</th>
+              <th scope="col">Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <EmptyRow colSpan={3} text={emptyText} />
+            ) : (
+              rows.map((row) => (
+                <tr key={row.name}>
+                  <td>
+                    {row.name}
+                    {row.folderCount > 1 ? (
+                      <span className="utilization-folder-count"> · {formatNumber(row.folderCount)} folders</span>
+                    ) : null}
+                  </td>
+                  <td className="table-number">{formatHours(row.hours)}</td>
+                  <td>{formatPct(row.sharePct)}</td>
                 </tr>
               ))
             )}
@@ -303,35 +365,29 @@ export function UtilizationView({
           least one trigger. Personal workspaces are left out.
         </p>
 
-        <div className="utilization-tables">
-          <div className="utilization-table-column">
-            <UsageTable caption="By robot" emptyText={emptyText} nameHeading="Robot" rows={model.robots} showBars />
-            <p className="utilization-caveat">
-              Hours are per robot account. One account can run on several runtimes at once, so its hours can pass{' '}
-              {formatNumber(sinceDays * 24)} h ({sinceDays} days × 24 h).
-            </p>
-          </div>
-          <div className="utilization-table-column">
-            <UsageTable
-              caption="By folder (share of consumed)"
-              emptyText={emptyText}
-              nameHeading="Folder"
-              rows={model.folders}
-              showBars={false}
-            />
-            <p className="utilization-caveat">
-              Capacity is not split by folder: machines are shared across folders, so per-folder capacity would count
-              them more than once.
-            </p>
-          </div>
-        </div>
-
         <div className="utilization-table-column">
           <RuntimeTypeTable emptyText={emptyText} rows={model.runtimeTypes} />
           <p className="utilization-caveat">
             Runtimes is the most of that type deployed to any one folder. Types marked No are shown for reference and are
             not in the headline.
           </p>
+        </div>
+
+        <div className="utilization-tables">
+          <div className="utilization-table-column">
+            <RobotTable emptyText={emptyText} rows={model.robots} />
+            <p className="utilization-caveat">
+              Hours are per robot account. One account can run on several runtimes at once, so its hours can pass{' '}
+              {formatNumber(sinceDays * 24)} h ({sinceDays} days × 24 h).
+            </p>
+          </div>
+          <div className="utilization-table-column">
+            <RootFolderTable emptyText={emptyText} rows={model.rootFolders} />
+            <p className="utilization-caveat">
+              Sub-folders roll up into their root folder. Capacity is not split by folder: machines are shared across
+              folders, so per-folder capacity would count them more than once.
+            </p>
+          </div>
         </div>
       </div>
     </section>

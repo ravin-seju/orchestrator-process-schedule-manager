@@ -14,6 +14,20 @@ export interface UtilizationRow {
   sharePct: number
 }
 
+export interface RobotRow extends UtilizationRow {
+  // Counted runtime types this robot account ran on, most hours first. One account can run on
+  // several (for example Unattended and Cloud Serverless).
+  runtimeTypes: { label: string; hours: number }[]
+}
+
+export interface RootFolderRow {
+  name: string
+  hours: number
+  sharePct: number
+  // Folders with job time rolled into this root, the root itself included.
+  folderCount: number
+}
+
 export interface RuntimeTypeRow {
   type: string | null
   label: string
@@ -37,8 +51,8 @@ export interface UtilizationModel {
   utilizationPct: number | null
   // Clamped to 0-100 for the meter and the headline tile.
   displayPct: number | null
-  robots: UtilizationRow[]
-  folders: UtilizationRow[]
+  robots: RobotRow[]
+  rootFolders: RootFolderRow[]
   runtimeTypes: RuntimeTypeRow[]
 }
 
@@ -56,19 +70,12 @@ const HOURS_PER_DAY = 24
 
 const add = <K>(map: Map<K, number>, key: K, value: number) => map.set(key, (map.get(key) ?? 0) + value)
 
-const toRows = (
-  secondsById: Map<number, number>,
-  totalSec: number,
-  nameFor: (id: number) => string,
-): UtilizationRow[] =>
-  [...secondsById.entries()]
-    .map(([id, sec]) => ({
-      id,
-      name: nameFor(id),
-      hours: sec / 3600,
-      sharePct: totalSec > 0 ? (sec / totalSec) * 100 : 0,
-    }))
-    .sort((a, b) => b.hours - a.hours || a.name.localeCompare(b.name))
+const byHoursThenName = (a: { hours: number; name: string }, b: { hours: number; name: string }) =>
+  b.hours - a.hours || a.name.localeCompare(b.name)
+
+// Root of a folder path, the same rule the app uses for folder colours ("Finance/Onboarding" ->
+// "Finance").
+const rootFolderName = (fullyQualifiedName: string) => fullyQualifiedName.split('/')[0]
 
 export function buildUtilizationModel({
   folderRuntimes,
@@ -103,7 +110,7 @@ export function buildUtilizationModel({
   // Consumed: job time on counted runtime types, outside excluded folders.
   let consumedSec = 0
   let excludedSec = 0
-  const byRobot = new Map<number, number>()
+  const byRobotType = new Map<number, Map<string, number>>()
   const byFolder = new Map<number, number>()
   const secByType = new Map<string | null, number>()
   for (const entry of usage) {
@@ -115,8 +122,44 @@ export function buildUtilizationModel({
     if (!isCountedRuntimeType(entry.runtimeType)) continue
     consumedSec += entry.sec
     add(byFolder, entry.folderId, entry.sec)
-    if (entry.robotId != null) add(byRobot, entry.robotId, entry.sec)
+    if (entry.robotId != null) {
+      const types = byRobotType.get(entry.robotId) ?? new Map<string, number>()
+      add(types, entry.runtimeType, entry.sec)
+      byRobotType.set(entry.robotId, types)
+    }
   }
+  const share = (sec: number) => (consumedSec > 0 ? (sec / consumedSec) * 100 : 0)
+
+  // Only robots with counted time: a robot known only from personal, development or agentic jobs
+  // isn't part of the fleet being measured.
+  const robots: RobotRow[] = [...byRobotType.entries()]
+    .map(([id, types]) => {
+      const sec = [...types.values()].reduce((sum, value) => sum + value, 0)
+      return {
+        id,
+        name: robotNames.get(id) ?? `Robot ${id}`,
+        hours: sec / 3600,
+        sharePct: share(sec),
+        runtimeTypes: [...types.entries()]
+          .map(([type, typeSec]) => ({ label: runtimeTypeLabel(type), hours: typeSec / 3600 }))
+          .sort((a, b) => b.hours - a.hours || a.label.localeCompare(b.label)),
+      }
+    })
+    .sort(byHoursThenName)
+
+  // Folders roll up to their root, shown as a share of consumed hours only. Capacity isn't split by
+  // folder, because a machine shared by several folders would count once per folder.
+  const rootTotals = new Map<string, { sec: number; folderCount: number }>()
+  for (const [folderId, sec] of byFolder) {
+    const root = rootFolderName(folderName(folderId))
+    const total = rootTotals.get(root) ?? { sec: 0, folderCount: 0 }
+    total.sec += sec
+    total.folderCount += 1
+    rootTotals.set(root, total)
+  }
+  const rootFolders: RootFolderRow[] = [...rootTotals.entries()]
+    .map(([name, total]) => ({ name, hours: total.sec / 3600, sharePct: share(total.sec), folderCount: total.folderCount }))
+    .sort(byHoursThenName)
 
   const source: CapacitySource = capacityRuntimes != null ? 'runtimes' : null
   const capacityHours = capacityRuntimes != null ? capacityRuntimes * HOURS_PER_DAY * sinceDays : null
@@ -149,12 +192,8 @@ export function buildUtilizationModel({
     idleHours: capacityHours != null ? Math.max(0, capacityHours - consumedHours) : null,
     utilizationPct,
     displayPct: utilizationPct != null ? Math.min(100, Math.max(0, utilizationPct)) : null,
-    // Only robots with counted time: a robot known only from personal, development or agentic
-    // jobs isn't part of the fleet being measured.
-    robots: toRows(byRobot, consumedSec, (id) => robotNames.get(id) ?? `Robot ${id}`),
-    // Folders are a share of consumed hours only; per-folder capacity would double-count shared
-    // machines.
-    folders: toRows(byFolder, consumedSec, folderName),
+    robots,
+    rootFolders,
     runtimeTypes,
   }
 }

@@ -13,6 +13,7 @@ afterEach(() => cleanup())
 const folderNames = new Map([
   [8101, 'Shared'],
   [8102, 'Finance Ops'],
+  [8103, 'Finance Ops/Onboarding'],
   [8104, 'Customer Ops'],
 ])
 
@@ -81,7 +82,7 @@ describe('UtilizationView', () => {
     renderView()
     const hint = await hintFor('Consumed')
     expect(hint).toContain('Sum of job durations (end − start) over the last 30 days')
-    expect(hint).toContain('across 3 folders = 2,952 h')
+    expect(hint).toContain('across 4 folders = 2,952 h')
   })
 
   it('shows the calculation behind the idle tile', async () => {
@@ -89,24 +90,44 @@ describe('UtilizationView', () => {
     expect(await hintFor('Idle')).toContain('7,200 h capacity − 2,952 h consumed = 4,248 h')
   })
 
-  it('lists robots with counted time by hours, with share bars', () => {
+  it('lists robots with counted time by hours, with their runtime types and share bars', () => {
     renderView()
 
     const rows = tableRows('By robot')
-    expect(rows.map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual([
-      'Bot.Alpha',
-      'Bot.Beta',
-      'Bot.Gamma',
+    expect(rows.map((row) => within(row).getAllByRole('cell').slice(0, 3).map((cell) => cell.textContent))).toEqual([
+      ['Bot.Alpha', 'Unattended+1', '1,830 h'],
+      ['Bot.Beta', 'Unattended+1', '738 h'],
+      ['Bot.Gamma', 'Unattended', '384 h'],
     ])
     expect(within(rows[0]).getByRole('img', { name: '62% of consumed hours' })).toBeInTheDocument()
   })
 
-  it('shows folder shares as plain percentages', () => {
+  it('lists every runtime type of a robot in a tooltip', async () => {
     renderView()
 
-    const [first] = tableRows('By folder (share of consumed)')
-    expect(within(first).getByText('Finance Ops')).toBeInTheDocument()
-    expect(within(first).getByText('45%')).toBeInTheDocument()
+    const [alpha] = tableRows('By robot')
+    fireEvent.focus(within(alpha).getByText('+1').closest('.utilization-type-list') as HTMLElement)
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Unattended: 1,180 h · Cloud Serverless: 650 h')
+  })
+
+  it('rolls folders up to their root and shows shares as plain percentages', () => {
+    renderView()
+
+    const rows = tableRows('By root folder (share of consumed)').map((row) =>
+      within(row).getAllByRole('cell').map((cell) => cell.textContent),
+    )
+    expect(rows).toEqual([
+      ['Finance Ops · 2 folders', '1,712 h', '58%'],
+      ['Customer Ops', '974 h', '33%'],
+      ['Shared', '266 h', '9%'],
+    ])
+  })
+
+  it('puts the runtime type table above the robot and folder tables', () => {
+    renderView()
+
+    const captions = [...document.querySelectorAll('.utilization-table-block h3')].map((h) => h.textContent)
+    expect(captions).toEqual(['By runtime type', 'By robot', 'By root folder (share of consumed)'])
   })
 
   it('breaks runtime types down, with uncounted types marked', () => {
@@ -114,7 +135,7 @@ describe('UtilizationView', () => {
 
     const rows = tableRows('By runtime type').map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))
     expect(rows).toEqual([
-      ['Unattended (Production)', '8', '2,036 h', 'Yes'],
+      ['Unattended', '8', '2,036 h', 'Yes'],
       ['Cloud Serverless', '3', '650 h', 'Yes'],
       ['Testing', '2', '266 h', 'Yes'],
       ['Development', '2', '12 h', 'No'],
@@ -124,12 +145,12 @@ describe('UtilizationView', () => {
   it('leaves personal workspaces out and says how much was left out', async () => {
     renderView({ excludedFolderIds: new Set([8101]) })
 
-    expect(tile('Consumed')).toHaveTextContent('2,302 h')
-    expect(tableRows('By robot').map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual([
-      'Bot.Alpha',
-      'Bot.Beta',
+    expect(tile('Consumed')).toHaveTextContent('2,686 h')
+    expect(tableRows('By root folder (share of consumed)').map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual([
+      'Finance Ops · 2 folders',
+      'Customer Ops',
     ])
-    expect(await hintFor('Consumed')).toContain('662 h in personal workspaces is left out.')
+    expect(await hintFor('Consumed')).toContain('278 h in personal workspaces is left out.')
   })
 
   it('drops the percentage, meter and idle tile when capacity is unknown', () => {

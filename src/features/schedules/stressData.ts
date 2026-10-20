@@ -252,7 +252,8 @@ export const stressUsage: UsageEntry[] = [
   { folderId: 8104, runtimeType: 'Serverless', robotId: 201, sec: hours(650) },
   { folderId: 8104, runtimeType: 'Unattended', robotId: 202, sec: hours(324) },
   { folderId: 8101, runtimeType: 'TestAutomation', robotId: 202, sec: hours(266) },
-  { folderId: 8101, runtimeType: 'Unattended', robotId: 203, sec: hours(384) },
+  // Finance Ops/Onboarding rolls up into the Finance Ops root folder.
+  { folderId: 8103, runtimeType: 'Unattended', robotId: 203, sec: hours(384) },
   { folderId: 8101, runtimeType: 'Development', robotId: 204, sec: hours(12) },
 ]
 

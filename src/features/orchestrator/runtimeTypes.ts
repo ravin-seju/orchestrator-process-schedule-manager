@@ -20,7 +20,7 @@ export const COUNTED_RUNTIME_TYPES: ReadonlySet<string> = new Set([
 ])
 
 const RUNTIME_TYPE_LABELS: Record<string, string> = {
-  Unattended: 'Unattended (Production)',
+  Unattended: 'Unattended',
   AutomationCloud: 'Cloud VM',
   Serverless: 'Cloud Serverless',
   NonProduction: 'Non-production',

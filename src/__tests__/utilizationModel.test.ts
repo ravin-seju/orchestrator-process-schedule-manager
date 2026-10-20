@@ -82,7 +82,9 @@ describe('buildUtilizationModel consumed', () => {
       input({ usage: [usageOf(100, 'Unattended', 1, 100), usageOf(100, 'Development', 1, 50), usageOf(100, null, 1, 25)] }),
     )
     expect(model.consumedHours).toBe(100)
-    expect(model.robots).toEqual([{ id: 1, name: 'Bot.Alpha', hours: 100, sharePct: 100 }])
+    expect(model.robots).toEqual([
+      { id: 1, name: 'Bot.Alpha', hours: 100, sharePct: 100, runtimeTypes: [{ label: 'Unattended', hours: 100 }] },
+    ])
   })
 
   it('leaves out personal workspaces and reports what was left out', () => {
@@ -96,7 +98,7 @@ describe('buildUtilizationModel consumed', () => {
     expect(model.consumedHours).toBe(100)
     expect(model.excludedHours).toBe(6)
     expect(model.robots.map((r) => r.name)).toEqual(['Bot.Alpha'])
-    expect(model.folders.map((f) => f.id)).toEqual([100])
+    expect(model.rootFolders.map((f) => f.name)).toEqual(['Finance'])
   })
 
   it('clamps the display value above 100% but keeps the raw ratio', () => {
@@ -112,16 +114,24 @@ describe('buildUtilizationModel consumed', () => {
     expect(model.consumedHours).toBe(0)
     expect(model.utilizationPct).toBe(0)
     expect(model.robots).toEqual([])
-    expect(model.folders).toEqual([])
+    expect(model.rootFolders).toEqual([])
   })
 })
 
 describe('buildUtilizationModel tables', () => {
   it('sorts robots by hours, with a share of consumed time and a fallback name', () => {
     const model = buildUtilizationModel(input({ robotNames: new Map([[1, 'Bot.Alpha']]) }))
-    expect(model.robots).toEqual([
-      { id: 1, name: 'Bot.Alpha', hours: 1800, sharePct: 62.5 },
-      { id: 2, name: 'Robot 2', hours: 1080, sharePct: 37.5 },
+    expect(model.robots.map(({ name, hours, sharePct }) => ({ name, hours, sharePct }))).toEqual([
+      { name: 'Bot.Alpha', hours: 1800, sharePct: 62.5 },
+      { name: 'Robot 2', hours: 1080, sharePct: 37.5 },
+    ])
+  })
+
+  it('lists the runtime types each robot ran on, most hours first', () => {
+    const model = buildUtilizationModel(input())
+    expect(model.robots[1].runtimeTypes).toEqual([
+      { label: 'Unattended', hours: 720 },
+      { label: 'Cloud Serverless', hours: 360 },
     ])
   })
 
@@ -132,12 +142,26 @@ describe('buildUtilizationModel tables', () => {
     expect(model.robots.map((r) => r.name)).toEqual(['Bot.Alpha', 'Bot.Beta'])
   })
 
-  it('reports folders as a share of consumed hours, with a fallback name', () => {
+  it('reports root folders as a share of consumed hours, with a fallback name', () => {
     const model = buildUtilizationModel(input({ folderNames: new Map([[100, 'Finance']]) }))
-    expect(model.folders).toEqual([
-      { id: 100, name: 'Finance', hours: 1800, sharePct: 62.5 },
-      { id: 200, name: 'Folder 200', hours: 1080, sharePct: 37.5 },
+    expect(model.rootFolders).toEqual([
+      { name: 'Finance', hours: 1800, sharePct: 62.5, folderCount: 1 },
+      { name: 'Folder 200', hours: 1080, sharePct: 37.5, folderCount: 1 },
     ])
+  })
+
+  it('rolls sub-folders up into their root folder', () => {
+    const model = buildUtilizationModel(
+      input({
+        usage: [usageOf(100, 'Unattended', 1, 60), usageOf(101, 'Unattended', 1, 30), usageOf(200, 'Unattended', 2, 10)],
+        folderNames: new Map([[100, 'Finance'], [101, 'Finance/Onboarding/EMEA'], [200, 'Shared']]),
+      }),
+    )
+    expect(model.rootFolders).toEqual([
+      { name: 'Finance', hours: 90, sharePct: 90, folderCount: 2 },
+      { name: 'Shared', hours: 10, sharePct: 10, folderCount: 1 },
+    ])
+    expect(model.consumedFolderCount).toBe(3)
   })
 
   it('breaks runtimes and hours down by type, counted types first', () => {
@@ -148,7 +172,7 @@ describe('buildUtilizationModel tables', () => {
       }),
     )
     expect(model.runtimeTypes).toEqual([
-      { type: 'Unattended', label: 'Unattended (Production)', counted: true, runtimes: 8, hours: 300 },
+      { type: 'Unattended', label: 'Unattended', counted: true, runtimes: 8, hours: 300 },
       { type: 'Serverless', label: 'Cloud Serverless', counted: true, runtimes: 0, hours: 50 },
       { type: 'Development', label: 'Development', counted: false, runtimes: 2, hours: 400 },
     ])

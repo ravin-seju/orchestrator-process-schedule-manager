@@ -2635,12 +2635,31 @@ h3 {
   height: 100%;
 }
 
+/* In a narrow cell the type name truncates and the "+N" count stays visible. */
+.utilization-type-list {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.utilization-type-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.utilization-type-list .table-more {
+  flex: 0 0 auto;
+}
+
 /* The calculation tooltips run to two or three sentences. */
 .ui-tooltip-content.utilization-hint {
   max-width: 360px;
 }
 
-.inventory-table tr[data-counted='false'] td {
+.inventory-table tr[data-counted='false'] td,
+.inventory-table .utilization-folder-count {
   color: var(--text-muted);
 }
 
