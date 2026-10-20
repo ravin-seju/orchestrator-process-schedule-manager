@@ -2,7 +2,9 @@ import type { ProcessSchedule, TenantInfo } from './orchestrator'
 import type { ScheduleOccurrence } from './scheduleUtils'
 
 export type StatusFilter = 'all' | 'enabled' | 'disabled'
-export type AttentionFilter = 'none' | 'duplicates' | 'stale' | 'collisions'
+// 'expired' has no metric chip — it is set only by the auto-disabled notice, which needs to reach
+// triggers the Enabled status filter hides. Everything else maps 1:1 to a SummaryMetricKey.
+export type AttentionFilter = 'none' | 'duplicates' | 'stale' | 'collisions' | 'expiring' | 'expired'
 export type CalendarViewMode = 'year' | 'month' | 'week'
 export type WorkspaceView = 'calendar' | 'inventory'
 export type ViewMode = 'spanBars' | 'timeBlocks'

@@ -89,11 +89,6 @@ export function parseScopes(scope: string): string[] {
   )
 }
 
-export function getMissingRequiredScopes(scope: string): string[] {
-  const configuredScopes = new Set(parseScopes(scope))
-  return REQUIRED_ORCHESTRATOR_SCOPES.filter((requiredScope) => !configuredScopes.has(requiredScope))
-}
-
 // One-time-per-connection acknowledgment that the External App must grant all required scopes.
 // Keyed by groupId because the scope grant lives on the External App (one clientId = one group),
 // shared across that group's tenant entries. Used to show the confirm step once, not every sign-in.

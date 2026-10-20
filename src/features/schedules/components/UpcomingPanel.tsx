@@ -9,6 +9,7 @@ export function UpcomingPanel({
   activeSelectedDayDetail,
   disabledCount,
   enabledCount,
+  horizonDays,
   isExpanded,
   onCloseDayDetails,
   onToggleExpanded,
@@ -24,6 +25,7 @@ export function UpcomingPanel({
   activeSelectedDayDetail: SelectedDayDetail | null
   disabledCount: number
   enabledCount: number
+  horizonDays?: number
   isExpanded: boolean
   onCloseDayDetails: () => void
   onToggleExpanded: () => void
@@ -57,6 +59,7 @@ export function UpcomingPanel({
       <DayDetailsPanel
         selectedDay={activeSelectedDayDetail}
         occurrences={selectedDayOccurrences}
+        horizonDays={horizonDays}
         onClose={onCloseDayDetails}
         runtimeStats={runtimeStats}
         robotNames={robotNames}

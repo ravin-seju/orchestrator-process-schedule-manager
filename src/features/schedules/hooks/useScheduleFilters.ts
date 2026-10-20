@@ -1,8 +1,9 @@
 import { useDeferredValue, useMemo } from 'react'
 import { buildScheduleSearchIndex, classifyRecurrenceBucket } from '../calendarDisplay'
 import type { ProcessSchedule } from '../orchestrator'
+import { defaultLifecycleHorizonDays } from '../constants'
 import { measurePerformance } from '../performance'
-import { getAssignedMachineIds, getAssignedRobotIds, getCachedScheduleOccurrences, isQueueTrigger, isStaleSchedule } from '../scheduleUtils'
+import { getAssignedMachineIds, getAssignedRobotIds, getCachedScheduleOccurrences, isAutoDisabledByStopDate, isQueueTrigger, isStaleSchedule, lifecycleMarkerTone } from '../scheduleUtils'
 import type { AttentionFilter, StatusFilter, TriggerTypeFilter } from '../types'
 
 const COLLISION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
@@ -94,6 +95,7 @@ export const applyAttentionFilter = (
   machineScope?: Set<number>,
   robotScope?: Set<number>,
   scheduleMachineIds?: Map<number, number[]>,
+  horizonDays: number = defaultLifecycleHorizonDays,
 ): ProcessSchedule[] => {
   if (attentionFilter === 'none') return matches
 
@@ -115,11 +117,26 @@ export const applyAttentionFilter = (
     return matches.filter((s) => colliding.has(s))
   }
 
+  // Same predicate the metric and the markers use, so the tile's count and the filtered row set
+  // can never disagree — including on the disabled triggers all three now exclude.
+  if (attentionFilter === 'expiring') {
+    const now = Date.now()
+    return matches.filter((s) => lifecycleMarkerTone(s, now, horizonDays) === 'amber')
+  }
+
+  // Horizon-independent on purpose: an auto-disabled trigger is already past its stop date, so
+  // widening or narrowing the "expiring within" window cannot change which ones qualify.
+  if (attentionFilter === 'expired') {
+    const now = Date.now()
+    return matches.filter((s) => isAutoDisabledByStopDate(s, now))
+  }
+
   return matches
 }
 
 export function useScheduleFilters({
   attentionFilter,
+  horizonDays = defaultLifecycleHorizonDays,
   query,
   schedules,
   scheduleMachineIds,
@@ -131,6 +148,7 @@ export function useScheduleFilters({
   triggerTypeFilter,
 }: {
   attentionFilter: AttentionFilter
+  horizonDays?: number
   query: string
   schedules: ProcessSchedule[]
   scheduleMachineIds?: Map<number, number[]>
@@ -207,8 +225,8 @@ export function useScheduleFilters({
   ])
 
   const filteredSchedules = useMemo(
-    () => applyAttentionFilter(preAttentionSchedules, attentionFilter, selectedMachineIdSet, selectedRobotIdSet, collisionMachineIds ?? scheduleMachineIds),
-    [preAttentionSchedules, attentionFilter, selectedMachineIdSet, selectedRobotIdSet, collisionMachineIds, scheduleMachineIds],
+    () => applyAttentionFilter(preAttentionSchedules, attentionFilter, selectedMachineIdSet, selectedRobotIdSet, collisionMachineIds ?? scheduleMachineIds, horizonDays),
+    [preAttentionSchedules, attentionFilter, selectedMachineIdSet, selectedRobotIdSet, collisionMachineIds, scheduleMachineIds, horizonDays],
   )
 
   return { filteredSchedules, preAttentionSchedules, trimmedQuery }

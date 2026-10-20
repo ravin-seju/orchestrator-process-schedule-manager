@@ -12,7 +12,7 @@ import {
 import { getEnvironmentDisplayLabel } from './features/schedules/constants'
 import { SchedulePlanner } from './features/schedules'
 import { AuthProvider, useAuth } from './hooks/useAuth'
-import { acknowledgeScopeGroup, getMissingRequiredScopes, isScopeAcknowledged, REQUIRED_ORCHESTRATOR_SCOPES } from './uipathConfig'
+import { acknowledgeScopeGroup, isScopeAcknowledged, REQUIRED_ORCHESTRATOR_SCOPES } from './uipathConfig'
 
 const friendlyAuthError = (message: string) => {
   const normalizedMessage = message.toLowerCase()
@@ -25,10 +25,7 @@ const friendlyAuthError = (message: string) => {
     return 'Sign-in could not be completed. Try signing in again. If it continues, confirm the redirect URI and External App setup.'
   }
 
-  if (
-    normalizedMessage.includes('missing configured scope') ||
-    normalizedMessage.includes('missing required scope')
-  ) {
+  if (normalizedMessage.includes('missing required scope')) {
     return 'Your session is missing required permissions. Sign in again to refresh your access.'
   }
 
@@ -53,13 +50,9 @@ function LoadingAuth() {
 function SignInGate() {
   const { activeAuthConfig, dismissSignInIncomplete, error, isAuthenticating, login, signInIncomplete } = useAuth()
   const [showConnectionManager, setShowConnectionManager] = useState(false)
-  const missingScopes = useMemo(
-    () => (activeAuthConfig ? getMissingRequiredScopes(activeAuthConfig.scope) : []),
-    [activeAuthConfig],
-  )
-  const canSignIn = Boolean(activeAuthConfig && missingScopes.length === 0)
+  const canSignIn = Boolean(activeAuthConfig)
   const activeConnectionEnvironment = activeAuthConfig ? getEnvironmentDisplayLabel(activeAuthConfig.urlApp) : ''
-  const requiresConnectionSetup = !activeAuthConfig || missingScopes.length > 0
+  const requiresConnectionSetup = !activeAuthConfig
   const showGuidedConnection = requiresConnectionSetup || showConnectionManager
   const authErrorMessage = error ? friendlyAuthError(error) : null
 
@@ -217,11 +210,6 @@ function SignInGate() {
           </div>
         ) : null}
 
-        {missingScopes.length ? (
-          <div className="auth-error">
-            This connection is missing required Orchestrator access: {missingScopes.join(', ')}.
-          </div>
-        ) : null}
         {authErrorMessage ? <div className="auth-error">{authErrorMessage}</div> : null}
         {!activeAuthConfig ? <p className="connection-help">Complete the connection selections above to enable sign in.</p> : null}
 

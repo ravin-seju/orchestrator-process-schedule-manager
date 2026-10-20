@@ -2,9 +2,26 @@ import { describe, expect, it } from 'vitest'
 import {
   buildEffectiveScheduleMachineIds,
   deriveFolderScopeSelection,
+  everyStopDateIsPast,
+  lifecycleMarkerTone,
   deriveMachineScopeSelection,
   formatRobotDisplayName,
+  fullDateTimeLabel,
+  getLifecycleStatus,
+  getScheduleOccurrences,
+  isAutoDisabledByStopDate,
+  isLifecycleAttention,
+  isoDateInZone,
+  isoDateTimeInZone,
+  isStaleSchedule,
+  lifecycleEndLabel,
+  patternLabel,
+  processLabel,
+  scheduleStopDate,
+  stopDateLabel,
+  stopStrategyLabel,
 } from '../scheduleUtils'
+import { EXPIRING_SOON_DAYS, lifecycleHorizonOptions } from '../constants'
 import type { ProcessSchedule } from '../orchestrator'
 
 function makeSchedule(
@@ -147,5 +164,382 @@ describe('deriveFolderScopeSelection', () => {
     const result = deriveFolderScopeSelection([s1], new Map(), ['10'])
     expect(result.machineIds).toEqual([])
     expect(result.robotIds).toEqual([201])
+  })
+})
+
+describe('getLifecycleStatus', () => {
+  const now = new Date(2026, 4, 6, 12, 0, 0).getTime()
+
+  it('returns null when there is no StopProcessDate', () => {
+    const s = makeSchedule(1)
+    expect(getLifecycleStatus(s, now)).toBeNull()
+  })
+
+  it('returns "expired" when the stop date has already passed', () => {
+    const s = makeSchedule(1, { StopProcessDate: new Date(now - 24 * 60 * 60 * 1000).toISOString() })
+    expect(getLifecycleStatus(s, now)).toBe('expired')
+  })
+
+  it('returns "expiring-soon" at the EXPIRING_SOON_DAYS boundary', () => {
+    const s = makeSchedule(1, {
+      StopProcessDate: new Date(now + EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+    })
+    expect(getLifecycleStatus(s, now)).toBe('expiring-soon')
+  })
+
+  it('returns "ending" for a stop date beyond the expiring-soon window', () => {
+    const s = makeSchedule(1, {
+      StopProcessDate: new Date(now + (EXPIRING_SOON_DAYS + 1) * 24 * 60 * 60 * 1000).toISOString(),
+    })
+    expect(getLifecycleStatus(s, now)).toBe('ending')
+  })
+
+  it('applies to queue triggers too, unlike the isQueueTrigger-gated cron logic elsewhere', () => {
+    const s = makeSchedule(1, {
+      QueueDefinitionId: 9001,
+      StopProcessDate: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+    })
+    expect(getLifecycleStatus(s, now)).toBe('expired')
+  })
+
+  it('moves the expiring-soon boundary with an explicit horizon', () => {
+    const in90Days = makeSchedule(1, {
+      StopProcessDate: new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+
+    expect(getLifecycleStatus(in90Days, now, 14)).toBe('ending')
+    expect(getLifecycleStatus(in90Days, now, 90)).toBe('expiring-soon')
+    expect(getLifecycleStatus(in90Days, now, 365)).toBe('expiring-soon')
+  })
+
+  it('leaves a two-year-out stop date beyond every selectable horizon', () => {
+    const in2Years = makeSchedule(1, {
+      StopProcessDate: new Date(now + 730 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+
+    for (const option of lifecycleHorizonOptions) {
+      expect(getLifecycleStatus(in2Years, now, option.days)).toBe('ending')
+    }
+  })
+
+  it('treats an already-past stop date as expired at every horizon', () => {
+    const past = makeSchedule(1, {
+      StopProcessDate: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+    })
+
+    // 'expired' is horizon-invariant, which is what lets isAutoDisabledByStopDate and
+    // lifecycleEndLabel skip the parameter entirely.
+    for (const days of [1, 14, 90, 365, 10_000]) {
+      expect(getLifecycleStatus(past, now, days)).toBe('expired')
+    }
+  })
+
+  it('defaults to EXPIRING_SOON_DAYS when no horizon is given', () => {
+    const atBoundary = makeSchedule(1, {
+      StopProcessDate: new Date(now + EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+    })
+
+    expect(getLifecycleStatus(atBoundary, now)).toBe(getLifecycleStatus(atBoundary, now, EXPIRING_SOON_DAYS))
+  })
+})
+
+describe('scheduleStopDate', () => {
+  it('returns null for a missing or unparseable stop date', () => {
+    expect(scheduleStopDate(makeSchedule(1))).toBeNull()
+    expect(scheduleStopDate(makeSchedule(1, { StopProcessDate: 'not-a-date' }))).toBeNull()
+  })
+
+  it('returns the parsed instant when the stop date is valid', () => {
+    const iso = new Date(Date.UTC(2027, 11, 18, 8, 30)).toISOString()
+    expect(scheduleStopDate(makeSchedule(1, { StopProcessDate: iso }))?.toISOString()).toBe(iso)
+  })
+})
+
+describe('lifecycleMarkerTone', () => {
+  const now = new Date(2026, 7, 20, 12, 0, 0).getTime()
+  const past = new Date(2026, 7, 15).toISOString()
+  const soon = new Date(2026, 7, 23).toISOString()
+  const farOff = new Date(2028, 7, 23).toISOString()
+
+  it('is amber inside the horizon and muted beyond it', () => {
+    expect(lifecycleMarkerTone(makeSchedule(1, { StopProcessDate: past }), now)).toBe('amber')
+    expect(lifecycleMarkerTone(makeSchedule(2, { StopProcessDate: soon }), now)).toBe('amber')
+    expect(lifecycleMarkerTone(makeSchedule(3, { StopProcessDate: farOff }), now)).toBe('muted')
+  })
+
+  it('is null for a disabled trigger whatever its stop date', () => {
+    // A disabled trigger will not run, so no lifecycle urgency applies — this is what removes the
+    // amber hourglass from every row of the Disabled inventory view.
+    for (const stop of [past, soon, farOff]) {
+      expect(lifecycleMarkerTone(makeSchedule(1, { Enabled: false, StopProcessDate: stop }), now)).toBeNull()
+    }
+  })
+
+  it('is null when there is no stop date at all', () => {
+    expect(lifecycleMarkerTone(makeSchedule(1), now)).toBeNull()
+  })
+
+  it('follows the horizon, so a 90-day stop date flips from muted to amber', () => {
+    const in90Days = makeSchedule(1, {
+      StopProcessDate: new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+
+    expect(lifecycleMarkerTone(in90Days, now, 14)).toBe('muted')
+    expect(lifecycleMarkerTone(in90Days, now, 365)).toBe('amber')
+  })
+})
+
+describe('everyStopDateIsPast', () => {
+  const now = new Date(2026, 7, 20, 12, 0, 0).getTime()
+  const past = makeSchedule(1, { StopProcessDate: new Date(2026, 7, 15).toISOString() })
+  const future = makeSchedule(2, { StopProcessDate: new Date(2026, 7, 25).toISOString() })
+  const none = makeSchedule(3)
+
+  it('is true only when at least one stop date exists and all of them are past', () => {
+    expect(everyStopDateIsPast([past], now)).toBe(true)
+    expect(everyStopDateIsPast([past, none], now)).toBe(true)
+    expect(everyStopDateIsPast([past, future], now)).toBe(false)
+    expect(everyStopDateIsPast([future], now)).toBe(false)
+  })
+
+  it('is false when nothing has a stop date, so the column stays future-tense', () => {
+    expect(everyStopDateIsPast([none], now)).toBe(false)
+    expect(everyStopDateIsPast([], now)).toBe(false)
+  })
+
+  it('ignores the Enabled flag — the heading follows dates, not status', () => {
+    const disabledFuture = makeSchedule(4, {
+      Enabled: false,
+      StopProcessDate: new Date(2026, 7, 25).toISOString(),
+    })
+    expect(everyStopDateIsPast([disabledFuture], now)).toBe(false)
+  })
+})
+
+describe('stopDateLabel', () => {
+  const stop = new Date(Date.UTC(2027, 11, 18, 14, 30))
+
+  it('includes the year, so a distant stop date is unambiguous', () => {
+    const label = stopDateLabel(makeSchedule(1, { TimeZoneIana: 'UTC' }), stop)
+    expect(label).toContain('2027')
+    expect(label).toContain('Dec')
+  })
+
+  it("renders in the schedule's own timezone, not the viewer's", () => {
+    // 14:30 UTC on 18 Dec is still 18 Dec in Chicago but already 19 Dec in Auckland, so the two
+    // labels must differ — proof the zone is applied rather than ignored.
+    const chicago = stopDateLabel(makeSchedule(1, { TimeZoneIana: 'America/Chicago' }), stop)
+    const auckland = stopDateLabel(makeSchedule(2, { TimeZoneIana: 'Pacific/Auckland' }), stop)
+
+    expect(chicago).not.toBe(auckland)
+  })
+
+  it('falls back to the host zone for an invalid IANA name instead of throwing', () => {
+    expect(() => stopDateLabel(makeSchedule(1, { TimeZoneIana: 'Not/AZone' }), stop)).not.toThrow()
+  })
+})
+
+describe('isLifecycleAttention', () => {
+  it('flags only the statuses the Expiring metric counts', () => {
+    expect(isLifecycleAttention('expired')).toBe(true)
+    expect(isLifecycleAttention('expiring-soon')).toBe(true)
+  })
+
+  it('excludes a far-future stop date and a missing one', () => {
+    expect(isLifecycleAttention('ending')).toBe(false)
+    expect(isLifecycleAttention(null)).toBe(false)
+  })
+})
+
+const dailyAt10 = (overrides: Partial<ProcessSchedule> = {}) =>
+  makeSchedule(1, {
+    StartProcessCron: '0 0 10 1/1 * ?',
+    StartProcessCronDetails: JSON.stringify({ type: 2, daily: { atHour: 10, atMinute: 0 } }),
+    StartProcessCronSummary: 'At 10:00 AM',
+    ...overrides,
+  })
+
+describe('StopProcessDate clamps occurrence generation', () => {
+  it('generates no runs when the whole window is past the stop date', () => {
+    const schedule = dailyAt10({ StopProcessDate: new Date(2026, 4, 1).toISOString() })
+
+    expect(getScheduleOccurrences(schedule, new Date(2026, 5, 1), new Date(2026, 5, 30, 23, 59, 59))).toEqual([])
+  })
+
+  it('keeps runs up to the stop date and drops the ones after it', () => {
+    const schedule = dailyAt10({ StopProcessDate: new Date(2026, 4, 5, 12, 0, 0).toISOString() })
+    const occurrences = getScheduleOccurrences(schedule, new Date(2026, 4, 1), new Date(2026, 4, 10, 23, 59, 59))
+
+    expect(occurrences.map((occurrence) => occurrence.date.getDate())).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('ignores a stop date it cannot parse rather than dropping every run', () => {
+    const schedule = dailyAt10({ StopProcessDate: 'not-a-date' })
+
+    expect(getScheduleOccurrences(schedule, new Date(2026, 4, 1), new Date(2026, 4, 3, 23, 59, 59))).toHaveLength(3)
+  })
+})
+
+describe('isStaleSchedule and StopProcessDate', () => {
+  const now = new Date(2026, 7, 20, 12, 0, 0).getTime()
+
+  it('flags an expired trigger as stale even when Orchestrator still reports a next run', () => {
+    const schedule = dailyAt10({
+      // Orchestrator has not cleared this yet, but the trigger stopped 5 days ago.
+      StartProcessNextOccurrence: new Date(2026, 7, 25, 10, 0, 0).toISOString(),
+      StopProcessDate: new Date(2026, 7, 15).toISOString(),
+    })
+
+    expect(isStaleSchedule(schedule, now)).toBe(true)
+  })
+
+  it('leaves a trigger alone while its stop date is still ahead', () => {
+    const schedule = dailyAt10({ StopProcessDate: new Date(2026, 8, 20).toISOString() })
+
+    expect(isStaleSchedule(schedule, now)).toBe(false)
+  })
+})
+
+describe('isAutoDisabledByStopDate', () => {
+  const now = new Date(2026, 7, 20, 12, 0, 0).getTime()
+  const past = new Date(2026, 7, 15).toISOString()
+
+  it('flags a disabled trigger whose stop date has passed', () => {
+    expect(isAutoDisabledByStopDate(makeSchedule(1, { Enabled: false, StopProcessDate: past }), now)).toBe(true)
+  })
+
+  it('does not flag one that is still enabled — Orchestrator has not stopped it yet', () => {
+    expect(isAutoDisabledByStopDate(makeSchedule(1, { Enabled: true, StopProcessDate: past }), now)).toBe(false)
+  })
+
+  it('does not flag a trigger someone disabled that has no stop date', () => {
+    expect(isAutoDisabledByStopDate(makeSchedule(1, { Enabled: false }), now)).toBe(false)
+  })
+
+  it('does not flag a disabled trigger whose stop date is still ahead', () => {
+    const soon = new Date(2026, 7, 23).toISOString()
+    expect(isAutoDisabledByStopDate(makeSchedule(1, { Enabled: false, StopProcessDate: soon }), now)).toBe(false)
+  })
+})
+
+describe('lifecycleEndLabel', () => {
+  const now = new Date(2026, 7, 20, 12, 0, 0).getTime()
+
+  it('uses the past tense once the stop date has gone by', () => {
+    const schedule = makeSchedule(1, { StopProcessDate: new Date(2026, 7, 15).toISOString() })
+    expect(lifecycleEndLabel(schedule, new Date(2026, 7, 15), now)).toMatch(/^Ended on /)
+  })
+
+  it('uses the future tense while the stop date is still ahead', () => {
+    const schedule = makeSchedule(1, { StopProcessDate: new Date(2026, 7, 23).toISOString() })
+    expect(lifecycleEndLabel(schedule, new Date(2026, 7, 23), now)).toMatch(/^Ends /)
+  })
+
+  it('is unaffected by whether Orchestrator has disabled the trigger yet', () => {
+    const stop = new Date(2026, 7, 15).toISOString()
+    const stillEnabled = makeSchedule(1, { Enabled: true, StopProcessDate: stop })
+    const disabled = makeSchedule(2, { Enabled: false, StopProcessDate: stop })
+
+    expect(lifecycleEndLabel(stillEnabled, new Date(stop), now)).toMatch(/^Ended on /)
+    expect(lifecycleEndLabel(disabled, new Date(stop), now)).toMatch(/^Ended on /)
+  })
+
+  it('keeps the future tense for a far-future stop date no matter the horizon', () => {
+    // The horizon decides urgency, not tense. A trigger ending in two years reads "Ends", whether
+    // or not the selected window happens to count it as expiring.
+    const stop = new Date(2028, 7, 15)
+    const schedule = makeSchedule(1, { StopProcessDate: stop.toISOString() })
+
+    expect(lifecycleEndLabel(schedule, stop, now)).toMatch(/^Ends /)
+  })
+})
+
+describe('horizon-independence of the expired helpers', () => {
+  const now = new Date(2026, 7, 20, 12, 0, 0).getTime()
+  const past = new Date(2026, 7, 15).toISOString()
+
+  it('isAutoDisabledByStopDate takes no horizon, so widening the window cannot change it', () => {
+    const autoDisabled = makeSchedule(1, { Enabled: false, StopProcessDate: past })
+    const farFutureDisabled = makeSchedule(2, {
+      Enabled: false,
+      StopProcessDate: new Date(2028, 7, 15).toISOString(),
+    })
+
+    expect(isAutoDisabledByStopDate(autoDisabled, now)).toBe(true)
+    // Disabled by hand well before its stop date — never auto-disabled at any horizon.
+    expect(isAutoDisabledByStopDate(farFutureDisabled, now)).toBe(false)
+  })
+})
+
+describe('fullDateTimeLabel', () => {
+  it('renders a stop date in the schedule timezone, not the viewer timezone', () => {
+    // 04:30 UTC is the previous day in Chicago but the same day in Tokyo — the exact case that made
+    // the day-details "Ends" line disagree with the trigger's own timezone label.
+    const instant = new Date('2026-09-01T04:30:00.000Z')
+
+    expect(fullDateTimeLabel(instant, 'America/Chicago')).toContain('August 31')
+    expect(fullDateTimeLabel(instant, 'Asia/Tokyo')).toContain('September 1')
+  })
+
+  it('names the zone so the instant is unambiguous', () => {
+    expect(fullDateTimeLabel(new Date('2026-09-01T04:30:00.000Z'), 'Asia/Tokyo')).toMatch(/GMT\+9|JST/)
+  })
+})
+
+describe('shared inventory labels', () => {
+  it('processLabel falls back from release to package to "Unknown"', () => {
+    expect(processLabel(makeSchedule(1, { ReleaseName: 'Release.A', PackageName: 'Pkg.A' }))).toBe('Release.A')
+    expect(processLabel(makeSchedule(2, { ReleaseName: null, PackageName: 'Pkg.B' }))).toBe('Pkg.B')
+    expect(processLabel(makeSchedule(3, { ReleaseName: null, PackageName: null }))).toBe('Unknown')
+  })
+
+  it('patternLabel is null for a queue trigger, so each caller chooses how to show "none"', () => {
+    expect(patternLabel(makeSchedule(1, { QueueDefinitionId: 9001, StartProcessCronSummary: 'Every minute' }))).toBeNull()
+    expect(patternLabel(makeSchedule(2, { StartProcessCronSummary: 'At 10:00 AM' }))).toBe('At 10:00 AM')
+  })
+})
+
+describe('stopStrategyLabel', () => {
+  const stop = new Date(2026, 8, 30).toISOString()
+
+  it('is null without a stop date — Orchestrator defaults StopStrategy to "SoftStop" regardless', () => {
+    expect(stopStrategyLabel(makeSchedule(1, { StopStrategy: 'SoftStop' }))).toBeNull()
+    expect(stopStrategyLabel(makeSchedule(2, { StopStrategy: 'Kill' }))).toBeNull()
+  })
+
+  it('names the configured strategy once a stop date exists', () => {
+    expect(stopStrategyLabel(makeSchedule(1, { StopProcessDate: stop, StopStrategy: 'Kill' }))).toBe('Kill')
+    expect(stopStrategyLabel(makeSchedule(2, { StopProcessDate: stop, StopStrategy: 'SoftStop' }))).toBe('Soft Stop')
+  })
+
+  it('is null for an unset strategy rather than implying Soft Stop', () => {
+    expect(stopStrategyLabel(makeSchedule(1, { StopProcessDate: stop }))).toBeNull()
+  })
+})
+
+describe('isoDateInZone / isoDateTimeInZone', () => {
+  it('assembles YYYY-MM-DD and YYYY-MM-DD HH:mm in the given zone', () => {
+    const instant = new Date(Date.UTC(2026, 7, 24, 19, 30))
+    expect(isoDateInZone(instant, 'America/Chicago')).toBe('2026-08-24')
+    expect(isoDateTimeInZone(instant, 'America/Chicago')).toBe('2026-08-24 14:30')
+  })
+
+  it('crosses the date line correctly — same instant, different calendar day', () => {
+    const instant = new Date(Date.UTC(2026, 7, 24, 3, 30))
+    expect(isoDateInZone(instant, 'America/Chicago')).toBe('2026-08-23')
+    expect(isoDateInZone(instant, 'Asia/Tokyo')).toBe('2026-08-24')
+  })
+
+  it('renders midnight as 00, never 24', () => {
+    // 05:05 UTC is 00:05 in Chicago during daylight time. Without hourCycle h23, some engines
+    // format this hour as "24" when hour12 is off.
+    expect(isoDateTimeInZone(new Date(Date.UTC(2026, 7, 24, 5, 5)), 'America/Chicago')).toBe('2026-08-24 00:05')
+  })
+
+  it('falls back to the viewer zone instead of throwing for a name Intl rejects', () => {
+    const instant = new Date(Date.UTC(2026, 7, 24, 12, 0))
+    // Windows names live in TimeZoneId; Intl only accepts IANA.
+    expect(isoDateInZone(instant, 'Central Standard Time')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(isoDateTimeInZone(instant, 'Not/AZone')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
   })
 })

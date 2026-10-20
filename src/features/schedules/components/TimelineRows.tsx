@@ -10,6 +10,7 @@ import {
   buildDensitySegments,
   groupAccentStyle,
 } from '../calendarDisplay'
+import { getLifecycleStatus, lifecycleEndLabel, lifecycleMarkerTone, scheduleStopDate } from '../scheduleUtils'
 import type { ScheduleOccurrence } from '../scheduleUtils'
 import type { CalendarSpanBar, ProcessDayGroup, ViewMode } from '../types'
 
@@ -38,15 +39,24 @@ export const ProcessTimelineRow = memo(function ProcessTimelineRow({
   onOpen,
   viewMode,
   compact = false,
+  horizonDays,
 }: {
   item: ProcessDayGroup
   onOpen: (item: ProcessDayGroup) => void
   viewMode: ViewMode
   compact?: boolean
+  horizonDays?: number
 }) {
   const timingLabel = item.runCount > 1 ? formatRunCount(item.runCount) : item.firstOccurrence.timeLabel
   const title = `${item.schedule.Name} · ${item.patternLabel} · ${timingLabel}`
   const rowModeClass = `mode-${viewMode}`
+  const lifecycleStatus = getLifecycleStatus(item.schedule, undefined, horizonDays)
+  const lifecycleStopDate = scheduleStopDate(item.schedule)
+  const markerTone = lifecycleMarkerTone(item.schedule, undefined, horizonDays)
+  const isSoon = markerTone === 'amber'
+  const lifecycleSuffix = lifecycleStopDate
+    ? ` · ${lifecycleEndLabel(item.schedule, lifecycleStopDate)}`
+    : ''
 
   return (
     <Tooltip>
@@ -58,6 +68,12 @@ export const ProcessTimelineRow = memo(function ProcessTimelineRow({
           type="button"
         >
           <span className="process-row-copy">
+            {markerTone ? (
+              <span
+                className={`lifecycle-dot lifecycle-${lifecycleStatus}${isSoon ? '' : ' is-later'}`}
+                aria-hidden="true"
+              />
+            ) : null}
             <span className="process-row-title">{item.schedule.Name}</span>
             <span className="process-row-meta">
               <span className="bucket-dot" aria-hidden="true" />
@@ -66,7 +82,7 @@ export const ProcessTimelineRow = memo(function ProcessTimelineRow({
           </span>
         </button>
       </TooltipTrigger>
-      <TooltipContent>{`Show exact runs for ${title}`}</TooltipContent>
+      <TooltipContent>{`Show exact runs for ${title}${lifecycleSuffix}`}</TooltipContent>
     </Tooltip>
   )
 })
@@ -74,12 +90,21 @@ export const ProcessTimelineRow = memo(function ProcessTimelineRow({
 export const ProcessSpanBar = memo(function ProcessSpanBar({
   bar,
   onOpen,
+  horizonDays,
 }: {
   bar: CalendarSpanBar
   onOpen: (item: ProcessDayGroup) => void
+  horizonDays?: number
 }) {
   const { item } = bar
   const title = `${item.schedule.Name} · ${item.patternLabel} · ${bar.timingLabel}`
+  const lifecycleStatus = getLifecycleStatus(item.schedule, undefined, horizonDays)
+  const lifecycleStopDate = scheduleStopDate(item.schedule)
+  const markerTone = lifecycleMarkerTone(item.schedule, undefined, horizonDays)
+  const isSoon = markerTone === 'amber'
+  const lifecycleSuffix = lifecycleStopDate
+    ? ` · ${lifecycleEndLabel(item.schedule, lifecycleStopDate)}`
+    : ''
 
   return (
     <Tooltip>
@@ -99,12 +124,18 @@ export const ProcessSpanBar = memo(function ProcessSpanBar({
           type="button"
         >
           <span className="calendar-span-copy">
+            {markerTone ? (
+              <span
+                className={`lifecycle-dot lifecycle-${lifecycleStatus}${isSoon ? '' : ' is-later'}`}
+                aria-hidden="true"
+              />
+            ) : null}
             <span className="calendar-span-title">{item.schedule.Name}</span>
             <span className="calendar-span-meta">{item.bucketLabel}</span>
           </span>
         </button>
       </TooltipTrigger>
-      <TooltipContent>{`Show exact runs for ${title}`}</TooltipContent>
+      <TooltipContent>{`Show exact runs for ${title}${lifecycleSuffix}`}</TooltipContent>
     </Tooltip>
   )
 })

@@ -12,6 +12,7 @@ import {
   getYearMonths,
   scheduleKey,
 } from '../calendarDisplay'
+import { AppHeader } from '../components/AppHeader'
 import { CalendarWorkbench } from '../components/CalendarWorkbench'
 import { FilterToolbar } from '../components/FilterToolbar'
 import { ScheduleTable } from '../components/ScheduleTable'
@@ -32,6 +33,7 @@ import {
   monthLabel,
   sortOccurrences,
 } from '../scheduleUtils'
+import type { SummaryMetricKey } from '../summaryMetrics'
 import type { CalendarViewMode, ViewMode } from '../types'
 
 // Components under test now render Radix tooltips, which throw without a
@@ -40,6 +42,46 @@ import type { CalendarViewMode, ViewMode } from '../types'
 // renders no DOM, so container/baseElement assertions are unaffected.
 const render = (ui: ReactElement, options?: Parameters<typeof baseRender>[1]) =>
   baseRender(ui, { wrapper: TooltipProvider, ...options })
+
+// AppHeader takes a wide required-prop surface that none of these assertions care about; only the
+// metric values and the two handlers vary, so everything else is fixed here.
+const renderHeader = ({
+  expiringCount,
+  horizonDays,
+  onHorizonChange,
+  onMetricClick = () => {},
+}: {
+  expiringCount: number
+  horizonDays?: number
+  onHorizonChange?: (days: number) => void
+  onMetricClick?: ((key: SummaryMetricKey) => void) | undefined
+}) =>
+  render(
+    <AppHeader
+      activeTenantName="Demo"
+      connectionLabel="Connected"
+      connectionState="connected"
+      connectionTitle="Connected to Demo"
+      environmentDisplayLabel="Cloud"
+      headerFilterChips={[]}
+      horizonDays={horizonDays}
+      isLoading={false}
+      metrics={[
+        { icon: null, key: 'triggers', label: 'Triggers', tone: 'var(--teal)', value: 10 },
+        { icon: null, key: 'expiring', label: 'Expiring', tone: 'var(--warning)', value: expiringCount },
+      ]}
+      nextThemeLabel="Dark"
+      onHorizonChange={onHorizonChange}
+      onMetricClick={onMetricClick}
+      onTenantChange={() => {}}
+      refresh={() => {}}
+      resolvedTheme="light"
+      selectedStressCount={null}
+      selectedTenant="Demo"
+      setThemeMode={() => {}}
+      tenantOptions={[]}
+    />,
+  )
 
 if (!Element.prototype.hasPointerCapture) {
   Element.prototype.hasPointerCapture = () => false
@@ -1227,6 +1269,76 @@ describe('CalendarWorkbench component', () => {
       clientWidthSpy.mockRestore()
     }
   })
+
+  const spanBarsForStopDate = (stopProcessDate: string) => {
+    const scenario = buildMonthScenario()
+    const schedule = baseSchedule({ Id: 70, Name: 'Lifecycle Process', StopProcessDate: stopProcessDate })
+    const range = getVisibleMonthRange(scenario.viewDate)
+    const occurrences = getScheduleOccurrences(schedule, range.start, range.end)
+    const calendarItemsByDay = buildCalendarItemsByDay(groupOccurrencesByDay(occurrences))
+
+    return buildSpanBarLayout(scenario.calendarDays, calendarItemsByDay, 2).bars
+  }
+
+  it('shows a glowing lifecycle dot on span bars for an expired trigger', () => {
+    const { container } = renderCalendarWorkbench({
+      overrides: { spanBars: spanBarsForStopDate(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()) },
+    })
+
+    expect(container.querySelector('.lifecycle-dot.lifecycle-expired')).not.toBeNull()
+  })
+
+  // The marker-equals-Expiring-metric invariant: a stop date beyond EXPIRING_SOON_DAYS is
+  // informational ('ending') and must not render a marker on any calendar surface.
+  it('renders a gray, non-urgent lifecycle dot on span bars for a far-future stop date', () => {
+    const { container } = renderCalendarWorkbench({
+      overrides: { spanBars: spanBarsForStopDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()) },
+    })
+
+    expect(container.querySelector('.calendar-span-bar')).not.toBeNull()
+    // Beyond the horizon the dot still renders, but as .is-later — gray and unanimated. Only what
+    // the Expiring metric counts gets the amber treatment.
+    expect(container.querySelector('.lifecycle-dot')).toHaveClass('is-later')
+  })
+
+  const renderWeekForStopDate = (stopProcessDate: string) => {
+    const viewDate = new Date(2026, 4, 6)
+    const calendarDays = getWeekDays(viewDate)
+    const range = getVisibleWeekRange(viewDate)
+    const schedule = baseSchedule({ Id: 71, Name: 'Lifecycle Week Process', StopProcessDate: stopProcessDate })
+    const calendarItemsByDay = buildCalendarItemsByDay(
+      groupOccurrencesByDay(getScheduleOccurrences(schedule, range.start, range.end)),
+    )
+    const spanBarLayout = buildSpanBarLayout(calendarDays, calendarItemsByDay, 7)
+
+    return renderCalendarWorkbench({
+      calendarMode: 'week',
+      overrides: {
+        calendarDays,
+        calendarItemsByDay,
+        calendarTitle: 'May 3-9, 2026',
+        calendarWeekCount: 1,
+        navigationUnitLabel: 'week',
+        spanBars: spanBarLayout.bars,
+        todayKey: dateKey(viewDate),
+        viewDate,
+        visibleSpanLaneLimit: 7,
+      },
+    })
+  }
+
+  it('shows a glowing lifecycle dot on Outlook Week timed events for a trigger expiring within EXPIRING_SOON_DAYS', () => {
+    const { container } = renderWeekForStopDate(new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString())
+
+    expect(container.querySelector('.lifecycle-dot.lifecycle-expiring-soon')).not.toBeNull()
+  })
+
+  it('renders a gray lifecycle dot on Outlook Week timed events for a far-future stop date', () => {
+    const { container } = renderWeekForStopDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())
+
+    expect(container.querySelector('.outlook-week-event')).not.toBeNull()
+    expect(container.querySelector('.lifecycle-dot')).toHaveClass('is-later')
+  })
 })
 
 describe('UpcomingPanel component', () => {
@@ -1363,7 +1475,7 @@ describe('UpcomingPanel component', () => {
         selectedDayOccurrences={occurrences}
         upcomingDisplayGroups={[]}
         runtimeStats={new Map([[group.schedule.Id, { medianSec: 180, p90Sec: 300, sampleSize: 15 }]])}
-        robotNames={new Map([[201, 'rparobot@intuit.com-unattended']])}
+        robotNames={new Map([[201, 'automationbot@example.com-unattended']])}
         machineNames={new Map([[501, 'ROBOT-VM-01']])}
         scheduleMachineIds={new Map([[group.schedule.Id, [501]]])}
       />,
@@ -1372,7 +1484,7 @@ describe('UpcomingPanel component', () => {
     expect(screen.getByText('Time zone: America/Chicago')).toBeInTheDocument()
     expect(screen.getByText('Runtime · based on 15 runs')).toBeInTheDocument()
     expect(screen.getByText('Typical 3m · Worst case (p90) 5m')).toBeInTheDocument()
-    expect(screen.getByText('Robot: rparobot')).toBeInTheDocument()
+    expect(screen.getByText('Robot: automationbot')).toBeInTheDocument()
     expect(screen.getByText('Machine: ROBOT-VM-01')).toBeInTheDocument()
   })
 
@@ -1393,7 +1505,7 @@ describe('UpcomingPanel component', () => {
         selectedDayOccurrences={occurrences}
         upcomingDisplayGroups={[]}
         runtimeStats={new Map([[group.schedule.Id, { medianSec: 180, p90Sec: 300, sampleSize: 15 }]])}
-        robotNames={new Map([[201, 'rparobot@intuit.com-unattended']])}
+        robotNames={new Map([[201, 'automationbot@example.com-unattended']])}
         machineNames={new Map(machineIds.map((id, index) => [id, `HOST-${index + 1}`]))}
         scheduleMachineIds={new Map([[group.schedule.Id, machineIds]])}
       />,
@@ -1453,6 +1565,65 @@ describe('UpcomingPanel component', () => {
     expect(screen.queryByText(/^Robot:/)).not.toBeInTheDocument()
     expect(screen.queryByText(/^Machine:/)).not.toBeInTheDocument()
   })
+
+  const renderDayDetailForStopDate = (stopProcessDate: string) => {
+    const schedule = baseSchedule({
+      Id: 72,
+      Name: 'Hourly Process',
+      ReleaseName: 'Download.File',
+      StartProcessCron: '0 0 * 1/1 * ?',
+      StartProcessCronDetails: JSON.stringify({ type: 1, hourly: { atHour: 0, atMinute: 0 } }),
+      StartProcessCronSummary: 'Every hour',
+      StopProcessDate: stopProcessDate,
+    })
+    const date = new Date(2026, 4, 6)
+    const { start, end } = dayRange(date)
+    const occurrences = getScheduleOccurrences(schedule, start, end)
+    const group = buildProcessDayGroups(occurrences)[0]
+
+    return render(
+      <UpcomingPanel
+        activeSelectedDayDetail={{ key: dateKey(date), date, scheduleKey: group.scheduleKey, scope: 'schedule' }}
+        disabledCount={0}
+        enabledCount={1}
+        isExpanded
+        onCloseDayDetails={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onOpenDay={vi.fn()}
+        onOpenDayDetail={vi.fn()}
+        selectedDayOccurrences={occurrences}
+        upcomingDisplayGroups={[]}
+      />,
+    )
+  }
+
+  it('shows the full glowing lifecycle badge in the group heading for an expired trigger', () => {
+    const { container } = renderDayDetailForStopDate(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+
+    const badge = container.querySelector('.lifecycle-badge.lifecycle-expired')
+    expect(badge).not.toBeNull()
+    // role="img" is what makes the aria-label reliably exposed; a bare span is role=generic,
+    // where ARIA prohibits aria-label and user agents need not expose it.
+    expect(badge).toHaveAttribute('role', 'img')
+    // Past stop date → past tense. The far-future case below still reads "Ends", which is what
+    // proves the tense keys off the date rather than being hardcoded.
+    expect(screen.getByRole('img', { name: /^Ended on / })).toBeInTheDocument()
+    expect(screen.getByText(/^Ended on /)).toBeInTheDocument()
+  })
+
+  it('renders a gray lifecycle badge for a far-future stop date and keeps the Ends text line', () => {
+    const { container } = renderDayDetailForStopDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())
+
+    expect(container.querySelector('.lifecycle-badge')).toHaveClass('is-later')
+    expect(screen.getByText(/^Ends /)).toBeInTheDocument()
+  })
+
+  it('omits the stop strategy when Orchestrator did not report one', () => {
+    const { container } = renderDayDetailForStopDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())
+
+    // StopStrategy is unset on this fixture, so no strategy must be asserted in the UI.
+    expect(container.querySelector('.day-detail-meta')?.textContent).not.toMatch(/Soft Stop|Kill/)
+  })
 })
 
 describe('ScheduleTable component', () => {
@@ -1487,7 +1658,7 @@ describe('ScheduleTable component', () => {
 
     const table = screen.getByRole('table')
     const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent)
-    expect(headers).toEqual(['#', 'Name', 'Process', 'Folder', 'Machine', 'Robot', 'Trigger Type', 'Pattern', 'Status'])
+    expect(headers).toEqual(['#', 'Name', 'Process', 'Folder', 'Machine', 'Robot', 'Trigger Type', 'Pattern', 'Ends', 'Status'])
     expect(within(table).getByText('1')).toBeInTheDocument()
     expect(within(table).getByText('2')).toBeInTheDocument()
     expect(within(table).getByText('3')).toBeInTheDocument()
@@ -1532,7 +1703,7 @@ describe('ScheduleTable component', () => {
       [503, 'HOST-3'],
       [504, 'HOST-4'],
     ])
-    const robotNames = new Map<number, string>([[201, 'rparobot@example.com-unattended']])
+    const robotNames = new Map<number, string>([[201, 'automationbot@example.com-unattended']])
 
     render(
       <ScheduleTable
@@ -1545,12 +1716,12 @@ describe('ScheduleTable component', () => {
 
     const table = screen.getByRole('table')
     const headers = within(table).getAllByRole('columnheader').map((header) => header.textContent)
-    expect(headers).toEqual(['#', 'Name', 'Process', 'Folder', 'Machine', 'Robot', 'Trigger Type', 'Pattern', 'Status'])
+    expect(headers).toEqual(['#', 'Name', 'Process', 'Folder', 'Machine', 'Robot', 'Trigger Type', 'Pattern', 'Ends', 'Status'])
 
     // Row 41: 3 machines → first host + "+2"; robot resolved via robotNames → formatRobotDisplayName.
     expect(screen.getByText('HOST-1')).toBeInTheDocument()
     expect(screen.getByText('+2')).toBeInTheDocument()
-    expect(screen.getByText('rparobot')).toBeInTheDocument()
+    expect(screen.getByText('automationbot')).toBeInTheDocument()
     // Full host list lives only in the (portal) tooltip — not inline in the DOM.
     expect(screen.queryByText('HOST-1, HOST-2, HOST-3')).not.toBeInTheDocument()
 
@@ -1590,8 +1761,325 @@ describe('ScheduleTable component', () => {
     expect(table.style.getPropertyValue('--inventory-folder-width')).toMatch(/%$/)
     expect(table.style.getPropertyValue('--inventory-pattern-width')).toMatch(/%$/)
     expect(table.style.getPropertyValue('--inventory-process-width')).toMatch(/%$/)
-    expect(table.style.getPropertyValue('--inventory-status-width')).toBe('6.5%')
+    // Wide enough for the "Auto-disabled" status chip, which would otherwise ellipsize.
+    expect(table.style.getPropertyValue('--inventory-status-width')).toBe('9.5%')
     expect(table.style.getPropertyValue('--inventory-type-width')).toBe('10.5%')
     expect(table.style.getPropertyValue('--inventory-table-min-width')).toBe('')
+  })
+
+  // reservedColumnPercent is a hand-maintained sum of the fixed column widths. If it drifts, the
+  // text-weighted columns are handed more space than is left and the row overflows horizontally.
+  it('keeps the fixed and dynamic column widths summing to 100%', () => {
+    render(<ScheduleTable schedules={[baseSchedule({ Id: 81, Name: 'Width Probe' })]} />)
+
+    const table = screen.getByRole('table')
+    const percent = (name: string) =>
+      Number.parseFloat(table.style.getPropertyValue(`--inventory-${name}-width`))
+    // Ends must stay a plain percentage. A px-floored clamp here over-subscribes the fixed
+    // table layout at narrow widths and the browser shrinks every column (measured 46px at
+    // 980px wide), so the unit matters as much as the number.
+    expect(table.style.getPropertyValue('--inventory-ends-width')).toBe('9%')
+    const fixed =
+      2.4 + percent('ends') + percent('status') + percent('type') + percent('machine') + percent('robot')
+    const dynamic = ['name', 'process', 'folder', 'pattern'].reduce((sum, k) => sum + percent(k), 0)
+
+    expect(fixed + dynamic).toBeCloseTo(100, 1)
+  })
+
+  it('shows a glowing lifecycle icon in the Pattern column with an accessible label and tooltip', async () => {
+    const stopDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+    const schedules = [
+      baseSchedule({
+        Id: 51,
+        Name: 'Expiring Soon Process',
+        StopProcessDate: stopDate.toISOString(),
+        StopStrategy: 'SoftStop',
+      }),
+      baseSchedule({ Id: 52, Name: 'No Stop Date Process' }),
+    ]
+
+    const { container } = render(<ScheduleTable schedules={schedules} />)
+
+    // Only the schedule with a StopProcessDate gets a badge; the other row has none.
+    const badges = container.querySelectorAll('.lifecycle-badge')
+    expect(badges).toHaveLength(1)
+    const badge = badges[0] as HTMLElement
+    expect(badge).toHaveClass('lifecycle-expiring-soon')
+    // Assert the ACCESSIBLE name, not just the attribute: role="img" is what makes aria-label
+    // exposed at all (a bare span is role=generic, where ARIA prohibits aria-label).
+    expect(screen.getByRole('img', { name: /^Ends / })).toBe(badge)
+
+    // Full date-time also lives in the tooltip (Radix portal) — revealed on focus.
+    fireEvent.focus(badge)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/^Ends /)
+  })
+
+  it('distinguishes an auto-disabled trigger from one someone switched off', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 71,
+        Name: 'Stopped On End Date',
+        Enabled: false,
+        StopProcessDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      baseSchedule({ Id: 72, Name: 'Switched Off By Hand', Enabled: false }),
+      baseSchedule({ Id: 73, Name: 'Running Fine' }),
+    ]
+
+    const { container } = render(<ScheduleTable schedules={schedules} />)
+
+    const statuses = Array.from(container.querySelectorAll('.status')).map((s) => s.textContent)
+    expect(statuses).toEqual(['Auto-disabled', 'Disabled', 'Enabled'])
+    // No marker on a disabled trigger: it is not going to run, so an urgent amber hourglass would
+    // be pointing at an event that has already happened, right beside a Status cell that says
+    // "Auto-disabled". The date still shows in the Ends column.
+    expect(container.querySelectorAll('.lifecycle-badge')).toHaveLength(0)
+    expect(container.querySelector('.table-ends')?.textContent).not.toBe('—')
+  })
+
+  it('drops the marker but keeps the date for a disabled trigger whose stop date is still ahead', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 74,
+        Name: 'Switched Off Before Its End Date',
+        Enabled: false,
+        StopProcessDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    ]
+
+    const { container } = render(<ScheduleTable schedules={schedules} />)
+
+    expect(container.querySelectorAll('.lifecycle-badge')).toHaveLength(0)
+    // Still future-tense, because the heading follows the dates, not the Enabled flag.
+    expect(container.querySelector('thead th:nth-child(9)')?.textContent).toBe('Ends')
+  })
+
+  it('heads the column "Ended" only when every stop date on screen is already past', () => {
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+    const heading = (schedules: ProcessSchedule[]) => {
+      const { container } = render(<ScheduleTable schedules={schedules} />)
+      const text = container.querySelector('thead th:nth-child(9)')?.textContent
+      cleanup()
+      return text
+    }
+
+    expect(heading([baseSchedule({ Id: 75, StopProcessDate: past })])).toBe('Ended')
+    expect(heading([baseSchedule({ Id: 76, StopProcessDate: future })])).toBe('Ends')
+    // Mixed tenses cannot both be right, so the column stays future-tense.
+    expect(
+      heading([
+        baseSchedule({ Id: 77, StopProcessDate: past }),
+        baseSchedule({ Id: 78, StopProcessDate: future }),
+      ]),
+    ).toBe('Ends')
+    // No stop dates at all: nothing has ended, so "Ends".
+    expect(heading([baseSchedule({ Id: 79 })])).toBe('Ends')
+  })
+
+  it('gives an amber marker only to the triggers the Expiring metric counts, gray to the rest', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 61,
+        Name: 'Expiring Soon Process',
+        StopProcessDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      baseSchedule({
+        Id: 62,
+        Name: 'Ends Far Future Process',
+        StopProcessDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      baseSchedule({ Id: 63, Name: 'No Stop Date Process' }),
+    ]
+
+    const { container } = render(<ScheduleTable schedules={schedules} />)
+
+    // Every stop date gets a marker now, but only what the Expiring metric counts is amber:
+    // .is-later is the gray, non-glowing variant. A trigger with no stop date gets nothing.
+    const badges = Array.from(container.querySelectorAll('.lifecycle-badge'))
+    expect(badges).toHaveLength(2)
+    expect(badges[0]).not.toHaveClass('is-later')
+    expect(badges[0]).toHaveClass('lifecycle-expiring-soon')
+    expect(badges[1]).toHaveClass('is-later')
+    expect(badges[1]).toHaveClass('lifecycle-ending')
+  })
+
+  it('moves the amber/gray boundary with the horizon, marker for marker', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 64,
+        Name: 'Ends In 90 Days',
+        StopProcessDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    ]
+
+    const { container: narrow } = render(<ScheduleTable schedules={schedules} horizonDays={14} />)
+    expect(narrow.querySelector('.lifecycle-badge')).toHaveClass('is-later')
+
+    cleanup()
+
+    const { container: wide } = render(<ScheduleTable schedules={schedules} horizonDays={365} />)
+    expect(wide.querySelector('.lifecycle-badge')).not.toHaveClass('is-later')
+  })
+
+  it('shows every stop date in the Ends column with a year, and an em dash when there is none', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 65,
+        Name: 'Ends In Two Years',
+        StopProcessDate: new Date(Date.UTC(2028, 11, 18, 12, 0)).toISOString(),
+        TimeZoneIana: 'UTC',
+      }),
+      baseSchedule({ Id: 66, Name: 'No Stop Date Process' }),
+    ]
+
+    const { container } = render(<ScheduleTable schedules={schedules} horizonDays={14} />)
+
+    const cells = Array.from(container.querySelectorAll('.table-ends'))
+    expect(cells).toHaveLength(2)
+    // Uncapped and horizon-independent: two years out, and outside the 14-day horizon, it still
+    // renders — with the year, which shortDateLabel would have omitted.
+    expect(cells[0]).toHaveTextContent('2028')
+    expect(cells[0]).toHaveTextContent('Dec')
+    expect(cells[0]).not.toHaveClass('is-soon')
+    expect(cells[1]).toHaveTextContent('—')
+  })
+
+  it('tints the Ends date to match the row marker inside the horizon', () => {
+    const schedules = [
+      baseSchedule({
+        Id: 67,
+        Name: 'Expiring Soon Process',
+        StopProcessDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    ]
+
+    const { container } = render(<ScheduleTable schedules={schedules} />)
+
+    expect(container.querySelector('.table-ends')).toHaveClass('is-soon')
+  })
+
+  it('renders the horizon toggle in the header, even with nothing expiring', () => {
+    // The regression that decided this control's placement. The alert-chip block collapses to a
+    // single "All clear" pill when every actionable metric is zero — a horizon toggle nested
+    // inside it would vanish in exactly the case you need it: nothing expiring in 14 days, and no
+    // way to widen the window to find what ends in six months.
+    renderHeader({ expiringCount: 0, onHorizonChange: () => {} })
+
+    expect(screen.getByText('All clear')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Expiring within' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '1y' })).toBeInTheDocument()
+  })
+
+  it('gates the horizon toggle on its own handler, not on metric clicks', () => {
+    // showActions also depends on onMetricClick, so binding the toggle to it would drop the
+    // control in any composition that omits metric clicks.
+    renderHeader({ expiringCount: 2, onHorizonChange: () => {}, onMetricClick: undefined })
+
+    expect(screen.getByRole('group', { name: 'Expiring within' })).toBeInTheDocument()
+  })
+
+  it('omits the horizon toggle entirely when no handler is supplied', () => {
+    renderHeader({ expiringCount: 2, onHorizonChange: undefined })
+
+    expect(screen.queryByRole('group', { name: 'Expiring within' })).not.toBeInTheDocument()
+  })
+
+  it('reports the selected horizon in days when a segment is pressed', () => {
+    const onHorizonChange = vi.fn()
+    renderHeader({ expiringCount: 2, onHorizonChange })
+
+    fireEvent.click(screen.getByRole('radio', { name: '90d' }))
+    expect(onHorizonChange).toHaveBeenCalledWith(90)
+
+    // Radix emits '' when the active segment is pressed again; there is no "no horizon" state,
+    // so that must not reach the handler.
+    onHorizonChange.mockClear()
+    fireEvent.click(screen.getByRole('radio', { name: '14d' }))
+    expect(onHorizonChange).not.toHaveBeenCalled()
+  })
+
+  it('keeps one colgroup entry per header cell', () => {
+    // A missing <col> silently drops a column's width variable, so the column falls back to auto
+    // and the row layout shifts. Note this does NOT cover inventoryColumnCount (the spacer
+    // colSpan): the virtualizer only emits spacers once it has measured a viewport height, and
+    // jsdom has no layout, so those rows never render here.
+    const { container } = render(<ScheduleTable schedules={[baseSchedule({ Id: 82, Name: 'Col Probe' })]} />)
+
+    expect(container.querySelectorAll('colgroup col')).toHaveLength(
+      container.querySelectorAll('thead th').length,
+    )
+  })
+
+  describe('export strip', () => {
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it('renders only when a tenant name is supplied', () => {
+      const schedules = [baseSchedule({ Id: 90, Name: 'Strip Probe' })]
+
+      const { container, unmount } = render(<ScheduleTable schedules={schedules} />)
+      expect(container.querySelector('.inventory-export-bar')).toBeNull()
+      unmount()
+
+      render(<ScheduleTable exportTenantName="Demo" schedules={schedules} />)
+      expect(screen.getByRole('button', { name: 'Export CSV' })).toBeEnabled()
+    })
+
+    it('counts the triggers it will export, singular and plural', () => {
+      const { unmount } = render(
+        <ScheduleTable exportTenantName="Demo" schedules={[baseSchedule({ Id: 91, Name: 'One' })]} />,
+      )
+      expect(screen.getByText('1 trigger matches your filters')).toBeInTheDocument()
+      unmount()
+
+      render(
+        <ScheduleTable
+          exportTenantName="Demo"
+          schedules={[baseSchedule({ Id: 92, Name: 'A' }), baseSchedule({ Id: 93, Name: 'B' })]}
+        />,
+      )
+      expect(screen.getByText('2 triggers match your filters')).toBeInTheDocument()
+    })
+
+    it('says so and disables the button when nothing matches', () => {
+      render(<ScheduleTable exportTenantName="Demo" schedules={[]} />)
+
+      expect(screen.getByText('No triggers match your filters')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Export CSV' })).toBeDisabled()
+    })
+
+    it('downloads every filtered trigger under a tenant-named file', async () => {
+      // jsdom implements neither object URLs nor navigation, so capture what would be downloaded.
+      const blobs: Blob[] = []
+      Object.assign(URL, {
+        createObjectURL: vi.fn((blob: Blob) => {
+          blobs.push(blob)
+          return 'blob:mock'
+        }),
+        revokeObjectURL: vi.fn(),
+      })
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+      // 120 rows: past the 80-row virtualization threshold, so a DOM-scraping export would come
+      // up short. The file must still hold every one.
+      const schedules = Array.from({ length: 120 }, (_, index) =>
+        baseSchedule({ Id: 300 + index, Name: `Bulk ${index}` }),
+      )
+
+      render(<ScheduleTable exportTenantName="Demo Tenant" schedules={schedules} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }))
+
+      const link = click.mock.contexts[0] as HTMLAnchorElement
+      expect(link.download).toMatch(/^process-schedules-demo-tenant-\d{4}-\d{2}-\d{2}\.csv$/)
+
+      const csv = await blobs[0].text()
+      const records = csv.replace(/^\uFEFF/, '').trimEnd().split('\r\n')
+      expect(records[0]).toBe(
+        'Name,Process,Folder,Machine,Robot,Trigger Type,Pattern,Ends,Status,Time zone,Next run,Stop strategy',
+      )
+      expect(records).toHaveLength(121)
+      expect(records[120].startsWith('Bulk 119,')).toBe(true)
+    })
   })
 })

@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { Hourglass, X } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
@@ -12,7 +12,17 @@ import {
 } from '../calendarDisplay'
 import { maxDetailTimeChips, maxHighFrequencyDetailTimeChips, maxInlineDetailMachines, recurrenceBucketLabels } from '../constants'
 import { formatNumber } from '../formatters'
-import { resolveMachineNames, resolveRobotNames, shortDateLabel, timeLabel } from '../scheduleUtils'
+import {
+  getLifecycleStatus,
+  lifecycleEndLabel,
+  lifecycleMarkerTone,
+  resolveMachineNames,
+  resolveRobotNames,
+  scheduleStopDate,
+  shortDateLabel,
+  stopStrategyLabel,
+  timeLabel,
+} from '../scheduleUtils'
 import type { ScheduleOccurrence } from '../scheduleUtils'
 import type { ProcessDayGroup, RuntimeStats, SelectedDayDetail, UpcomingDisplayItem } from '../types'
 
@@ -90,6 +100,7 @@ export function UpcomingPill({
 export function DayDetailsPanel({
   selectedDay,
   occurrences,
+  horizonDays,
   onClose,
   runtimeStats,
   robotNames,
@@ -98,6 +109,7 @@ export function DayDetailsPanel({
 }: {
   selectedDay: SelectedDayDetail
   occurrences: ScheduleOccurrence[]
+  horizonDays?: number
   onClose: () => void
   runtimeStats?: Map<number, RuntimeStats>
   robotNames?: Map<number, string>
@@ -145,6 +157,12 @@ export function DayDetailsPanel({
             const groupMachines = showRunInfo
               ? resolveMachineNames(group.schedule.Id, scheduleMachineIds, machineNames)
               : []
+            const lifecycleStatus = getLifecycleStatus(group.schedule, undefined, horizonDays)
+            const lifecycleStopDate = scheduleStopDate(group.schedule)
+            const lifecycleTone = lifecycleMarkerTone(group.schedule, undefined, horizonDays)
+            const lifecycleIsSoon = lifecycleTone === 'amber'
+            // Shared with the CSV export — see stopStrategyLabel for the two traps it guards.
+            const strategyLabel = stopStrategyLabel(group.schedule)
 
             return (
               <section
@@ -153,14 +171,35 @@ export function DayDetailsPanel({
                 style={folderColorVars(group.schedule.folderName)}
               >
                 <div className="day-detail-group-heading">
+                  {lifecycleTone && lifecycleStopDate ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={`lifecycle-badge lifecycle-${lifecycleStatus}${lifecycleIsSoon ? '' : ' is-later'}`}
+                          role="img"
+                          aria-label={lifecycleEndLabel(group.schedule, lifecycleStopDate)}
+                        >
+                          <Hourglass size={12} aria-hidden="true" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{lifecycleEndLabel(group.schedule, lifecycleStopDate)}</TooltipContent>
+                    </Tooltip>
+                  ) : null}
                   <div>
                     <h3>{group.schedule.Name}</h3>
                     <p>{recurrenceBucketLabels[bucket]} · {group.schedule.folderName}</p>
                   </div>
                 </div>
-                {timeZone || showRunInfo ? (
+                {timeZone || showRunInfo || group.schedule.StopProcessDate ? (
                   <div className="day-detail-meta">
                     {timeZone ? <p>Time zone: {timeZone}</p> : null}
+                    {group.schedule.StopProcessDate ? (
+                      <p>
+                        {lifecycleStatus === 'expired' ? 'Ended on ' : 'Ends '}
+                        {shortDateLabel(new Date(group.schedule.StopProcessDate), timeZone)}
+                        {strategyLabel ? ` · ${strategyLabel}` : ''}
+                      </p>
+                    ) : null}
                     {showRunInfo ? (
                       stats ? (
                         <>
