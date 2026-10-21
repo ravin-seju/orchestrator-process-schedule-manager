@@ -16,8 +16,8 @@ const formatHours = (hours: number) =>
 const formatPct = (pct: number) => `${Math.round(pct)}%`
 
 // Higher is better: idle robot capacity is what schedules should be using. Low utilization is red
-// (schedules need work), the middle band orange, and high utilization green.
-const toneColor = { low: 'var(--danger)', medium: 'var(--orange)', high: 'var(--success)' } as const
+// (schedules need work), the middle band orange, and high utilization the app's teal accent.
+const toneColor = { low: 'var(--danger)', medium: 'var(--orange)', high: 'var(--teal)' } as const
 
 // Explanations sit behind an info icon so the whole view fits the screen without scrolling.
 function InfoTip({ label, children }: { label: string; children: ReactNode }) {

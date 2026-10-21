@@ -177,6 +177,19 @@ describe('UtilizationView', () => {
     expect((await screen.findByRole('tooltip')).textContent).toContain('its hours can pass 720 h (30 days × 24 h)')
   })
 
+  it('colours the meter so higher utilization reads better: red, orange, then teal', () => {
+    const fill = () => document.querySelector('.utilization-meter-fill') as HTMLElement
+    // Stress data: 2,952 h consumed.
+    renderView() // 10 runtimes = 7,200 h -> 41%
+    expect(fill().style.background).toBe('var(--danger)')
+    cleanup()
+    renderView({ folderRuntimes: [{ folderId: 8102, runtimeType: 'Unattended', total: 5 }] }) // 3,600 h -> 82%
+    expect(fill().style.background).toBe('var(--orange)')
+    cleanup()
+    renderView({ folderRuntimes: [{ folderId: 8102, runtimeType: 'Unattended', total: 4 }] }) // 2,880 h -> 103%
+    expect(fill().style.background).toBe('var(--teal)')
+  })
+
   it('names the counted column plainly', () => {
     renderView()
     expect(screen.getByRole('columnheader', { name: 'Counted in utilization' })).toBeInTheDocument()
