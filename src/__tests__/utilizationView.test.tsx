@@ -15,6 +15,7 @@ const folderNames = new Map([
   [8102, 'Finance Ops'],
   [8103, 'Finance Ops/Onboarding'],
   [8104, 'Customer Ops'],
+  [8105, 'IT Operations/Patching'],
 ])
 
 const renderView = (
@@ -26,6 +27,7 @@ const renderView = (
       <UtilizationView
         isCapacityLoading={isCapacityLoading}
         isLoading={isLoading}
+        runtimesFetchedAt={new Date(2026, 9, 20, 10, 42).getTime()}
         model={buildUtilizationModel({
           folderRuntimes: stressFolderRuntimes,
           usage: stressUsage,
@@ -40,7 +42,8 @@ const renderView = (
     </TooltipProvider>,
   )
 
-const tile = (label: string) => screen.getByText(label).closest('.header-metric-item') as HTMLElement
+const tiles = () => document.querySelector('.utilization-tiles') as HTMLElement
+const tile = (label: string) => within(tiles()).getByText(label).closest('.header-metric-item') as HTMLElement
 
 const hintFor = async (label: string) => {
   fireEvent.focus(tile(label))
@@ -117,9 +120,10 @@ describe('UtilizationView', () => {
       within(row).getAllByRole('cell').map((cell) => cell.textContent),
     )
     expect(rows).toEqual([
-      ['Finance Ops · 2 folders', '1,712 h', '58%'],
-      ['Customer Ops', '974 h', '33%'],
-      ['Shared', '266 h', '9%'],
+      ['Finance Ops · 2 folders', '10', '1,712 h', '58%'],
+      ['Customer Ops', '9', '974 h', '33%'],
+      ['Shared', '4', '266 h', '9%'],
+      ['IT OperationsIdle', '3', '0 h', '—'],
     ])
   })
 
@@ -135,10 +139,10 @@ describe('UtilizationView', () => {
 
     const rows = tableRows('By runtime type').map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))
     expect(rows).toEqual([
-      ['Unattended', '8', '2,036 h', 'Yes'],
-      ['Cloud Serverless', '3', '650 h', 'Yes'],
-      ['Testing', '2', '266 h', 'Yes'],
-      ['Development', '2', '12 h', 'No'],
+      ['Unattended', '8', '7', '1', '2,036 h', 'Yes'],
+      ['Cloud Serverless', '3', '3', '0', '650 h', 'Yes'],
+      ['Testing', '2', '2', '0', '266 h', 'Yes'],
+      ['Development', '2', '1', '1', '12 h', 'No'],
     ])
   })
 
@@ -146,10 +150,8 @@ describe('UtilizationView', () => {
     renderView({ excludedFolderIds: new Set([8101]) })
 
     expect(tile('Consumed')).toHaveTextContent('2,686 h')
-    expect(tableRows('By root folder (share of consumed)').map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual([
-      'Finance Ops · 2 folders',
-      'Customer Ops',
-    ])
+    const active = tableRows('By root folder (share of consumed)').filter((row) => row.getAttribute('data-idle') === 'false')
+    expect(active.map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual(['Finance Ops · 2 folders', 'Customer Ops'])
     expect(await hintFor('Consumed')).toContain('278 h in personal workspaces is left out.')
   })
 
@@ -183,11 +185,40 @@ describe('UtilizationView', () => {
     renderView() // 10 runtimes = 7,200 h -> 41%
     expect(fill().style.background).toBe('var(--danger)')
     cleanup()
-    renderView({ folderRuntimes: [{ folderId: 8102, runtimeType: 'Unattended', total: 5 }] }) // 3,600 h -> 82%
+    renderView({ folderRuntimes: [{ folderId: 8102, runtimeType: 'Unattended', total: 5, connected: 5, available: 0 }] }) // 3,600 h -> 82%
     expect(fill().style.background).toBe('var(--orange)')
     cleanup()
-    renderView({ folderRuntimes: [{ folderId: 8102, runtimeType: 'Unattended', total: 4 }] }) // 2,880 h -> 103%
+    renderView({ folderRuntimes: [{ folderId: 8102, runtimeType: 'Unattended', total: 4, connected: 4, available: 0 }] }) // 2,880 h -> 103%
     expect(fill().style.background).toBe('var(--teal)')
+  })
+
+  it('charts busy runtimes for each hour of the day and labels the peak', async () => {
+    renderView()
+
+    expect(document.querySelectorAll('.utilization-hourly-bar')).toHaveLength(24)
+    expect(screen.getByText('Peak 02:00 · 85% of capacity')).toBeInTheDocument()
+    fireEvent.focus(document.querySelector('.utilization-hourly-bar[data-peak="true"]') as HTMLElement)
+    expect((await screen.findByRole('tooltip')).textContent).toBe('02:00–03:00: avg 8.5 of 10 runtimes busy (85%)')
+  })
+
+  it('shows live, wait, failed and concentration signals with their calculations', async () => {
+    renderView()
+
+    const chips = within(screen.getByRole('list', { name: 'Operational signals' }))
+    expect(chips.getByText(/Right now: 4 busy · 5 idle · 1 offline/)).toBeInTheDocument()
+    expect(chips.getByText(/Jobs waiting > 5 min: \d+%/)).toHaveTextContent('(avg 2.5 min)')
+    expect(chips.getByText(/Failed or stopped runs: 4% of hours/)).toHaveTextContent('(118 h)')
+    expect(chips.getByText(/One robot account carries 62% of hours/)).toBeInTheDocument()
+
+    fireEvent.focus(chips.getByText(/Right now/))
+    expect((await screen.findByRole('tooltip')).textContent).toContain('From Finance Ops, the folder with the most counted runtimes: 10 deployed.')
+  })
+
+  it('does not warn about concentration below 50%', () => {
+    renderView({
+      usage: stressUsage.map((entry) => (entry.robotId === 201 ? { ...entry, sec: entry.sec / 4, byHour: entry.byHour.map((sec) => sec / 4) } : entry)),
+    })
+    expect(screen.queryByText(/One robot account carries/)).not.toBeInTheDocument()
   })
 
   it('names the counted column plainly', () => {

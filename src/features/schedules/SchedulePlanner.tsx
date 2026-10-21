@@ -247,7 +247,7 @@ function Dashboard({
     () => runtimeFolderIds.filter((id) => !personalFolderIds.has(id)),
     [runtimeFolderIds, personalFolderIds],
   )
-  const { folderRuntimes, isLoading: isCapacityLoading } = useFolderRuntimes(
+  const { folderRuntimes, fetchedAt: runtimesFetchedAt, isLoading: isCapacityLoading } = useFolderRuntimes(
     sdk,
     runtimeTenant,
     hasOpenedUtilization && capacityFolderIds.length ? capacityFolderIds : undefined,
@@ -743,6 +743,7 @@ function Dashboard({
       ) : (
         <UtilizationView
           isCapacityLoading={isCapacityLoading}
+          runtimesFetchedAt={runtimesFetchedAt}
           isLoading={isJobHistoryLoading}
           model={utilizationModel}
           sinceDays={utilizationSinceDays}

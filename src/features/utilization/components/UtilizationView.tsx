@@ -1,8 +1,9 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { Gauge, Info } from 'lucide-react'
+import { AlertTriangle, Gauge, Info } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatNumber } from '@/features/schedules/formatters'
 import {
+  CONCENTRATION_WARNING_PCT,
   utilizationTone,
   type RobotRow,
   type RootFolderRow,
@@ -185,31 +186,35 @@ function RootFolderTable({ rows, emptyText, info }: { rows: RootFolderRow[]; emp
       <div className="utilization-table-scroll">
         <table className="inventory-table utilization-table">
           <colgroup>
-            <col style={{ width: '52%' }} />
-            <col style={{ width: '26%' }} />
-            <col style={{ width: '22%' }} />
+            <col style={{ width: '44%' }} />
+            <col style={{ width: '16%' }} />
+            <col style={{ width: '20%' }} />
+            <col style={{ width: '20%' }} />
           </colgroup>
           <thead>
             <tr>
               <th scope="col">Root folder</th>
+              <th scope="col">Runtimes</th>
               <th scope="col">Hours</th>
               <th scope="col">Share</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <EmptyRow colSpan={3} text={emptyText} />
+              <EmptyRow colSpan={4} text={emptyText} />
             ) : (
               rows.map((row) => (
-                <tr key={row.name}>
+                <tr key={row.name} data-idle={row.idle}>
                   <td>
                     {row.name}
                     {row.folderCount > 1 ? (
                       <span className="utilization-folder-count"> · {formatNumber(row.folderCount)} folders</span>
                     ) : null}
+                    {row.idle ? <span className="utilization-idle-tag">Idle</span> : null}
                   </td>
+                  <td className="table-number">{row.runtimes > 0 ? formatNumber(row.runtimes) : '—'}</td>
                   <td className="table-number">{formatHours(row.hours)}</td>
-                  <td>{formatPct(row.sharePct)}</td>
+                  <td>{row.idle ? '—' : formatPct(row.sharePct)}</td>
                 </tr>
               ))
             )}
@@ -229,15 +234,19 @@ function RuntimeTypeTable({ rows, emptyText, info }: { rows: RuntimeTypeRow[]; e
       <div className="utilization-table-scroll">
         <table className="inventory-table utilization-table">
           <colgroup>
-            <col style={{ width: '40%' }} />
-            <col style={{ width: '20%' }} />
-            <col style={{ width: '20%' }} />
-            <col style={{ width: '20%' }} />
+            <col style={{ width: '30%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '13%' }} />
+            <col style={{ width: '11%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '22%' }} />
           </colgroup>
           <thead>
             <tr>
               <th scope="col">Runtime type</th>
               <th scope="col">Runtimes</th>
+              <th scope="col">Connected</th>
+              <th scope="col">Offline</th>
               <th scope="col">Hours</th>
               <th scope="col">Counted in utilization</th>
             </tr>
@@ -245,7 +254,7 @@ function RuntimeTypeTable({ rows, emptyText, info }: { rows: RuntimeTypeRow[]; e
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td className="utilization-empty" colSpan={4}>
+                <td className="utilization-empty" colSpan={6}>
                   {emptyText}
                 </td>
               </tr>
@@ -254,6 +263,8 @@ function RuntimeTypeTable({ rows, emptyText, info }: { rows: RuntimeTypeRow[]; e
                 <tr key={row.type ?? 'unknown'} data-counted={row.counted}>
                   <td>{row.label}</td>
                   <td className="table-number">{row.runtimes > 0 ? formatNumber(row.runtimes) : '—'}</td>
+                  <td className="table-number">{row.runtimes > 0 ? formatNumber(row.connected) : '—'}</td>
+                  <td className="table-number">{row.runtimes > 0 ? formatNumber(row.offline) : '—'}</td>
                   <td className="table-number">{row.hours > 0 ? formatHours(row.hours) : '—'}</td>
                   <td>{row.counted ? 'Yes' : 'No'}</td>
                 </tr>
@@ -266,16 +277,173 @@ function RuntimeTypeTable({ rows, emptyText, info }: { rows: RuntimeTypeRow[]; e
   )
 }
 
+const hourLabel = (hour: number) => `${String(hour).padStart(2, '0')}:00`
+
+const formatRuntimes = (value: number) => (value >= 10 ? formatNumber(Math.round(value)) : value.toFixed(1))
+
+// Average busy runtimes for each hour of the day across the window, against capacity. The 30-day
+// average hides peaks; this shows when the fleet is actually full.
+function HourlyChart({ model }: { model: UtilizationModel }) {
+  const peak = model.peakHour
+  if (!peak) return null
+  const capacity = model.capacityRuntimes
+  // Scale to whichever is taller, so a peak above the capacity floor still fits.
+  const scaleMax = Math.max(capacity ?? 0, peak.avgBusy) || 1
+  const peakText =
+    peak.pctOfCapacity != null
+      ? `Peak ${hourLabel(peak.hour)} · ${formatPct(peak.pctOfCapacity)} of capacity`
+      : `Peak ${hourLabel(peak.hour)} · avg ${formatRuntimes(peak.avgBusy)} runtimes busy`
+  return (
+    <div className="utilization-hourly" role="group" aria-label="Busy runtimes by hour of day">
+      <div className="utilization-hourly-head">
+        <span>
+          Busy runtimes by hour of day{' '}
+          <InfoTip label="About the hourly chart">
+            Each bar is the average number of runtimes busy in that hour across the last 30 days: the job time in that
+            hour ÷ (30 days × 1 h). The dashed line is capacity. Hours are in your browser's time zone.
+          </InfoTip>
+        </span>
+        <strong>{peakText}</strong>
+      </div>
+      <div className="utilization-hourly-bars">
+        {capacity ? (
+          <span className="utilization-hourly-capacity" style={{ bottom: `${(capacity / scaleMax) * 100}%` }} aria-hidden="true" />
+        ) : null}
+        {model.hourly.map((bucket) => (
+          <Tooltip key={bucket.hour}>
+            <TooltipTrigger asChild>
+              <span
+                className="utilization-hourly-bar"
+                data-peak={bucket.hour === peak.hour}
+                style={{ height: `${Math.max(2, (bucket.avgBusy / scaleMax) * 100)}%` }}
+                tabIndex={-1}
+              />
+            </TooltipTrigger>
+            <TooltipContent className="utilization-hint">
+              {hourLabel(bucket.hour)}–{hourLabel((bucket.hour + 1) % 24)}: avg {formatRuntimes(bucket.avgBusy)}
+              {capacity ? ` of ${formatNumber(capacity)}` : ''} runtimes busy
+              {bucket.pctOfCapacity != null ? ` (${formatPct(bucket.pctOfCapacity)})` : ''}
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+      <div className="utilization-hourly-axis" aria-hidden="true">
+        <span>00</span>
+        <span>06</span>
+        <span>12</span>
+        <span>18</span>
+        <span>23</span>
+      </div>
+    </div>
+  )
+}
+
+function Chip({ children, hint, warn = false }: { children: ReactNode; hint: ReactNode; warn?: boolean }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="utilization-chip" data-warn={warn} tabIndex={0}>
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="utilization-hint">{hint}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function SignalChips({ model, fetchedAt, sinceDays }: { model: UtilizationModel; fetchedAt: number | null; sinceDays: number }) {
+  const { live, wait, concentration } = model
+  const asOf = fetchedAt != null ? new Date(fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null
+  const chips: ReactNode[] = []
+  if (live && asOf) {
+    chips.push(
+      <Chip
+        key="live"
+        hint={
+          <>
+            From {live.folderName}, the folder with the most counted runtimes: {formatNumber(live.total)} deployed.
+            Busy = connected − available; offline = deployed − connected, so those runtimes have no host online and
+            can't take work. Read at {asOf}; refreshed every 4 hours.
+          </>
+        }
+      >
+        Right now: {formatNumber(live.busy)} busy · {formatNumber(live.idle)} idle · {formatNumber(live.offline)} offline{' '}
+        <span className="utilization-chip-muted">(as of {asOf})</span>
+      </Chip>,
+    )
+  }
+  if (wait) {
+    chips.push(
+      <Chip
+        key="wait"
+        hint={
+          <>
+            Time from job creation to start for {formatNumber(wait.jobCount)} jobs on counted runtimes over the last{' '}
+            {sinceDays} days. Long waits mean jobs queued for a free robot, even when the average utilization is low.
+          </>
+        }
+      >
+        Jobs waiting &gt; 5 min: {formatPct(wait.over5MinPct)}{' '}
+        <span className="utilization-chip-muted">(avg {wait.avgWaitMin.toFixed(1)} min)</span>
+      </Chip>,
+    )
+  }
+  if (model.consumedHours > 0) {
+    chips.push(
+      <Chip
+        key="failed"
+        hint={
+          <>
+            {formatHours(model.failedHours)} of {formatHours(model.consumedHours)} consumed went to runs that ended Faulted
+            or Stopped. That robot time produced no finished work.
+          </>
+        }
+      >
+        Failed or stopped runs: {formatPct(model.failedPct)} of hours{' '}
+        <span className="utilization-chip-muted">({formatHours(model.failedHours)})</span>
+      </Chip>,
+    )
+  }
+  if (concentration) {
+    chips.push(
+      <Chip
+        key="concentration"
+        warn
+        hint={
+          <>
+            {concentration.name} ran {formatPct(concentration.sharePct)} of consumed hours. If that account's credentials
+            or license lapse, most automation stops. Warning shown at {CONCENTRATION_WARNING_PCT}% or more.
+          </>
+        }
+      >
+        <AlertTriangle size={12} aria-hidden="true" /> One robot account carries {formatPct(concentration.sharePct)} of hours
+      </Chip>,
+    )
+  }
+  if (chips.length === 0) return null
+  return (
+    <div className="utilization-chips" role="list" aria-label="Operational signals">
+      {chips.map((chip, index) => (
+        <span key={index} role="listitem">
+          {chip}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export function UtilizationView({
   model,
   sinceDays,
   isLoading,
   isCapacityLoading,
+  runtimesFetchedAt,
 }: {
   model: UtilizationModel
   sinceDays: number
   isLoading: boolean
   isCapacityLoading: boolean
+  runtimesFetchedAt: number | null
 }) {
   const tone = model.displayPct != null ? utilizationTone(model.displayPct) : null
   const emptyText = isLoading ? 'Loading job history…' : `No production or testing jobs ran in the last ${sinceDays} days.`
@@ -301,6 +469,7 @@ export function UtilizationView({
           </span>
         </header>
 
+        <div className="utilization-headline">
         <div className="header-metric-stats utilization-tiles">
           {model.utilizationPct != null && model.displayPct != null && tone && capacity ? (
             <Tile
@@ -360,6 +529,8 @@ export function UtilizationView({
             />
           ) : null}
         </div>
+        <HourlyChart model={model} />
+        </div>
 
         {model.displayPct != null && tone ? (
           <div className="utilization-meter-block">
@@ -388,6 +559,8 @@ export function UtilizationView({
           </div>
         ) : null}
 
+        <SignalChips fetchedAt={runtimesFetchedAt} model={model} sinceDays={sinceDays} />
+
         <div className="utilization-body">
         <RuntimeTypeTable
           emptyText={emptyText}
@@ -415,8 +588,9 @@ export function UtilizationView({
             emptyText={emptyText}
             info={
               <>
-                Sub-folders roll up into their root folder. Capacity is not split by folder: machines are shared across
-                folders, so per-folder capacity would count them more than once.
+                Sub-folders roll up into their root folder. Runtimes is the most counted runtimes deployed to any one
+                folder in the root; a pool shared with other folders appears in each, so these don't add up to the
+                headline capacity. Idle roots have runtimes deployed but ran no counted jobs in the window.
               </>
             }
             rows={model.rootFolders}

@@ -12,7 +12,9 @@ import { loadFolderRuntimes } from '@/features/machines/orchestrator'
 
 const sdk = {} as UiPath
 
-const runtimes = (rows: [string, number][]) => ({ value: rows.map(([Type, Total]) => ({ Type, Total })) })
+const runtimes = (rows: [string, number, number?, number?][]) => ({
+  value: rows.map(([Type, Total, Connected = Total, Available = 0]) => ({ Type, Total, Connected, Available })),
+})
 
 const byFolder = (responses: Record<number, ReturnType<typeof runtimes> | Error>) =>
   fetchOData.mockImplementation(async (_sdk, _tenant, path: string) => {
@@ -29,16 +31,16 @@ beforeEach(() => {
 describe('loadFolderRuntimes', () => {
   it('returns one entry per folder and runtime type with deployed runtimes', async () => {
     byFolder({
-      100: runtimes([['Unattended', 11], ['Development', 2], ['Serverless', 0]]),
+      100: runtimes([['Unattended', 11, 10, 4], ['Development', 2], ['Serverless', 0]]),
       200: runtimes([['Unattended', 6]]),
     })
 
     const entries = await loadFolderRuntimes(sdk, 'Demo', [100, 200])
 
     expect(entries).toEqual([
-      { folderId: 100, runtimeType: 'Unattended', total: 11 },
-      { folderId: 100, runtimeType: 'Development', total: 2 },
-      { folderId: 200, runtimeType: 'Unattended', total: 6 },
+      { folderId: 100, runtimeType: 'Unattended', total: 11, connected: 10, available: 4 },
+      { folderId: 100, runtimeType: 'Development', total: 2, connected: 2, available: 0 },
+      { folderId: 200, runtimeType: 'Unattended', total: 6, connected: 6, available: 0 },
     ])
   })
 
@@ -62,7 +64,7 @@ describe('loadFolderRuntimes', () => {
 
     const entries = await loadFolderRuntimes(sdk, 'Demo', [100, 200])
 
-    expect(entries).toEqual([{ folderId: 200, runtimeType: 'Unattended', total: 4 }])
+    expect(entries).toEqual([{ folderId: 200, runtimeType: 'Unattended', total: 4, connected: 4, available: 0 }])
   })
 
   it('returns nothing when every folder fails', async () => {

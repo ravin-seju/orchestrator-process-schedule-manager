@@ -2577,6 +2577,112 @@ h3 {
   row-gap: 12px;
 }
 
+/* Tiles on the left, the hour-of-day chart in the space to their right. */
+.utilization-headline {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  justify-content: space-between;
+}
+
+.utilization-headline > .utilization-tiles {
+  flex: 0 1 auto;
+}
+
+.utilization-hourly {
+  display: grid;
+  flex: 1 1 280px;
+  gap: 3px;
+  max-width: 460px;
+  min-width: 240px;
+}
+
+.utilization-hourly-head {
+  align-items: baseline;
+  color: var(--text-muted);
+  display: flex;
+  font-size: var(--font-xs);
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.utilization-hourly-head strong {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.utilization-hourly-bars {
+  align-items: flex-end;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 2px;
+  height: 44px;
+  position: relative;
+}
+
+.utilization-hourly-bar {
+  background: color-mix(in srgb, var(--metric-utilization) 45%, transparent);
+  border-radius: 2px 2px 0 0;
+  flex: 1 1 0;
+}
+
+.utilization-hourly-bar[data-peak='true'] {
+  background: var(--teal);
+}
+
+.utilization-hourly-capacity {
+  border-top: 1px dashed var(--text-muted);
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+}
+
+.utilization-hourly-axis {
+  color: var(--text-muted);
+  display: flex;
+  font-size: var(--font-xs);
+  justify-content: space-between;
+}
+
+.utilization-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.utilization-chip {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  display: inline-flex;
+  font-size: var(--font-xs);
+  gap: 4px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.utilization-chip[data-warn='true'] {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  color: color-mix(in srgb, var(--warning) 70%, var(--text-strong));
+}
+
+.utilization-chip-muted {
+  color: var(--text-muted);
+}
+
+.utilization-idle-tag {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--font-xxs);
+  margin-left: 6px;
+  padding: 0 6px;
+}
+
 .utilization-meter {
   background: var(--surface-soft);
   border-radius: 5px;
@@ -2620,14 +2726,14 @@ h3 {
   transform: translateX(-100%);
 }
 
-/* The three tables share the height left under the headline. The robot and folder tables are
-   guaranteed 150px first; the runtime-type table takes up to its content height from what's
-   left and scrolls when there isn't room. */
+/* The three tables share the height left under the headline. The runtime-type table always keeps
+   its heading, column header and one row (84px) and the robot and folder tables 120px; past that
+   the type table takes up to its content height and each table scrolls inside itself. */
 .utilization-panel > .utilization-body {
   display: grid;
   flex: 1 1 0;
   gap: 12px;
-  grid-template-rows: minmax(0, max-content) minmax(150px, 1fr);
+  grid-template-rows: minmax(84px, max-content) minmax(120px, 1fr);
   min-height: 0;
 }
 
@@ -2710,6 +2816,35 @@ h3 {
 .inventory-table .utilization-empty {
   color: var(--text-muted);
   text-align: center;
+}
+
+/* Narrower windows: the chips drop their muted detail (still in each tooltip) so they keep to
+   one row. */
+@media (max-width: 1100px) {
+  .utilization-chip-muted {
+    display: none;
+  }
+}
+
+/* Short windows: a tighter headline leaves the tables their share of the height. */
+@media (max-height: 760px) {
+  .utilization-panel {
+    gap: 8px;
+    padding-bottom: 12px;
+    padding-top: 10px;
+  }
+
+  .utilization-tiles .header-metric-item strong {
+    font-size: 22px;
+  }
+
+  .utilization-hourly-bars {
+    height: 30px;
+  }
+
+  .utilization-meter-scale {
+    display: none;
+  }
 }
 
 /* Stacked on narrow screens the tables can't share one screen height, so the panel scrolls

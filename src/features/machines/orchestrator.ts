@@ -4,12 +4,18 @@ import { fetchOData, settledBatch } from '@/features/orchestrator/odataClient'
 interface RawMachineRuntime {
   Type?: string | null
   Total?: number | null
+  Connected?: number | null
+  Available?: number | null
 }
 
 export interface FolderRuntimeEntry {
   folderId: number
   runtimeType: string
+  // Deployed runtimes; of these, `connected` have a host online and `available` are connected and
+  // idle at load time. total - connected = offline, connected - available = busy.
   total: number
+  connected: number
+  available: number
 }
 
 // Deployed runtimes per folder and runtime type, from the one runtime endpoint these tenants allow
@@ -33,7 +39,14 @@ export async function loadFolderRuntimes(
   for (const [index, result] of settled.entries()) {
     if (result.status !== 'fulfilled') continue
     for (const row of result.value.value ?? []) {
-      if (row.Type && row.Total) entries.push({ folderId: folderIds[index], runtimeType: row.Type, total: row.Total })
+      if (!row.Type || !row.Total) continue
+      entries.push({
+        folderId: folderIds[index],
+        runtimeType: row.Type,
+        total: row.Total,
+        connected: row.Connected ?? 0,
+        available: row.Available ?? 0,
+      })
     }
   }
   return entries

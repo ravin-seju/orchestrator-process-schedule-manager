@@ -5,14 +5,33 @@ import { buildUtilizationModel, utilizationTone, type UtilizationInput } from '@
 
 const hours = (h: number) => h * 3600
 
-const usageOf = (folderId: number, runtimeType: string | null, robotId: number | null, h: number): UsageEntry => ({
+const usageOf = (
+  folderId: number,
+  runtimeType: string | null,
+  robotId: number | null,
+  h: number,
+  extra: Partial<UsageEntry> = {},
+): UsageEntry => ({
   folderId,
   runtimeType,
   robotId,
   sec: hours(h),
+  failedSec: 0,
+  // All of it in the 10:00 hour unless a test says otherwise.
+  byHour: Array.from({ length: 24 }, (_, hour) => (hour === 10 ? hours(h) : 0)),
+  waitSec: 0,
+  waitCount: 0,
+  waitBuckets: [0, 0, 0, 0, 0],
+  ...extra,
 })
 
-const rt = (folderId: number, runtimeType: string, total: number): FolderRuntimeEntry => ({ folderId, runtimeType, total })
+const rt = (folderId: number, runtimeType: string, total: number, connected = total, available = 0): FolderRuntimeEntry => ({
+  folderId,
+  runtimeType,
+  total,
+  connected,
+  available,
+})
 
 const input = (overrides: Partial<UtilizationInput> = {}): UtilizationInput => ({
   folderRuntimes: [rt(100, 'Unattended', 8), rt(100, 'TestAutomation', 2), rt(200, 'Unattended', 6)],
@@ -82,7 +101,7 @@ describe('buildUtilizationModel consumed', () => {
       input({ usage: [usageOf(100, 'Unattended', 1, 100), usageOf(100, 'Development', 1, 50), usageOf(100, null, 1, 25)] }),
     )
     expect(model.consumedHours).toBe(100)
-    expect(model.robots).toEqual([
+    expect(model.robots).toMatchObject([
       { id: 1, name: 'Bot.Alpha', hours: 100, sharePct: 100, runtimeTypes: [{ label: 'Unattended', hours: 100 }] },
     ])
   })
@@ -98,7 +117,7 @@ describe('buildUtilizationModel consumed', () => {
     expect(model.consumedHours).toBe(100)
     expect(model.excludedHours).toBe(6)
     expect(model.robots.map((r) => r.name)).toEqual(['Bot.Alpha'])
-    expect(model.rootFolders.map((f) => f.name)).toEqual(['Finance'])
+    expect(model.rootFolders.filter((f) => !f.idle).map((f) => f.name)).toEqual(['Finance'])
   })
 
   it('clamps the display value above 100% but keeps the raw ratio', () => {
@@ -114,7 +133,9 @@ describe('buildUtilizationModel consumed', () => {
     expect(model.consumedHours).toBe(0)
     expect(model.utilizationPct).toBe(0)
     expect(model.robots).toEqual([])
-    expect(model.rootFolders).toEqual([])
+    // Folders with runtimes still show, as idle.
+    expect(model.rootFolders.every((f) => f.idle && f.hours === 0)).toBe(true)
+    expect(model.peakHour).toBeNull()
   })
 })
 
@@ -144,7 +165,7 @@ describe('buildUtilizationModel tables', () => {
 
   it('reports root folders as a share of consumed hours, with a fallback name', () => {
     const model = buildUtilizationModel(input({ folderNames: new Map([[100, 'Finance']]) }))
-    expect(model.rootFolders).toEqual([
+    expect(model.rootFolders).toMatchObject([
       { name: 'Finance', hours: 1800, sharePct: 62.5, folderCount: 1 },
       { name: 'Folder 200', hours: 1080, sharePct: 37.5, folderCount: 1 },
     ])
@@ -157,7 +178,7 @@ describe('buildUtilizationModel tables', () => {
         folderNames: new Map([[100, 'Finance'], [101, 'Finance/Onboarding/EMEA'], [200, 'Shared']]),
       }),
     )
-    expect(model.rootFolders).toEqual([
+    expect(model.rootFolders).toMatchObject([
       { name: 'Finance', hours: 90, sharePct: 90, folderCount: 2 },
       { name: 'Shared', hours: 10, sharePct: 10, folderCount: 1 },
     ])
@@ -171,7 +192,7 @@ describe('buildUtilizationModel tables', () => {
         usage: [usageOf(100, 'Unattended', 1, 300), usageOf(200, 'Serverless', 2, 50), usageOf(100, 'Development', 3, 400)],
       }),
     )
-    expect(model.runtimeTypes).toEqual([
+    expect(model.runtimeTypes).toMatchObject([
       { type: 'Unattended', label: 'Unattended', counted: true, runtimes: 8, hours: 300 },
       { type: 'Serverless', label: 'Cloud Serverless', counted: true, runtimes: 0, hours: 50 },
       { type: 'Development', label: 'Development', counted: false, runtimes: 2, hours: 400 },
@@ -185,5 +206,85 @@ describe('utilizationTone', () => {
     expect(utilizationTone(50)).toBe('medium')
     expect(utilizationTone(85)).toBe('medium')
     expect(utilizationTone(85.1)).toBe('high')
+  })
+})
+
+describe('buildUtilizationModel operational signals', () => {
+  it('reads live status from the capacity folder only, so shared pools are not double-counted', () => {
+    const model = buildUtilizationModel(
+      input({ folderRuntimes: [rt(100, 'Unattended', 8, 7, 3), rt(100, 'TestAutomation', 2, 2, 2), rt(200, 'Unattended', 6, 6, 6)] }),
+    )
+    expect(model.live).toEqual({ folderName: 'Finance', total: 10, busy: 4, idle: 5, offline: 1 })
+  })
+
+  it('reports connected and offline runtimes per type from the largest folder of that type', () => {
+    const model = buildUtilizationModel(input({ folderRuntimes: [rt(100, 'Unattended', 8, 5), rt(200, 'Unattended', 6, 6)] }))
+    expect(model.runtimeTypes[0]).toMatchObject({ type: 'Unattended', runtimes: 8, connected: 5, offline: 3 })
+  })
+
+  it('lists roots with runtimes but no counted jobs as idle, last', () => {
+    const model = buildUtilizationModel(
+      input({
+        folderRuntimes: [rt(100, 'Unattended', 8), rt(300, 'Unattended', 3)],
+        folderNames: new Map([[100, 'Finance'], [200, 'Shared'], [300, 'Pilot/Team A']]),
+      }),
+    )
+    expect(model.rootFolders.at(-1)).toEqual({ name: 'Pilot', hours: 0, sharePct: 0, folderCount: 1, runtimes: 3, idle: true })
+    expect(model.rootFolders[0]).toMatchObject({ name: 'Finance', runtimes: 8, idle: false })
+  })
+
+  it('finds the peak hour as average busy runtimes against capacity', () => {
+    const byHour = Array.from({ length: 24 }, (_, hour) => (hour === 2 ? hours(240) : hour === 14 ? hours(60) : 0))
+    const model = buildUtilizationModel(input({ usage: [usageOf(100, 'Unattended', 1, 300, { byHour })] }))
+    // 240 h in the 02:00 hour over 30 days = 8 runtimes busy on average, of 10.
+    expect(model.peakHour).toEqual({ hour: 2, avgBusy: 8, pctOfCapacity: 80 })
+    expect(model.hourly[14].avgBusy).toBe(2)
+    expect(model.hourly).toHaveLength(24)
+  })
+
+  it('summarises waits as an average and the share over 5 minutes', () => {
+    const model = buildUtilizationModel(
+      input({
+        usage: [
+          usageOf(100, 'Unattended', 1, 10, { waitSec: 1200, waitCount: 4, waitBuckets: [2, 1, 1, 0, 0] }),
+          usageOf(100, 'Development', 1, 10, { waitSec: 99999, waitCount: 9, waitBuckets: [0, 0, 0, 0, 9] }),
+        ],
+      }),
+    )
+    expect(model.wait).toEqual({ jobCount: 4, avgWaitMin: 5, over5MinPct: 25 })
+  })
+
+  it('has no wait summary when no job had a usable creation time', () => {
+    expect(buildUtilizationModel(input()).wait).toBeNull()
+  })
+
+  it('reports failed time as a share of consumed hours', () => {
+    const model = buildUtilizationModel(
+      input({ usage: [usageOf(100, 'Unattended', 1, 75, { failedSec: hours(3) }), usageOf(200, 'Unattended', 2, 25)] }),
+    )
+    expect(model.failedHours).toBe(3)
+    expect(model.failedPct).toBeCloseTo(3)
+  })
+
+  it('warns about concentration from 50% of hours on one robot account', () => {
+    const at = (alpha: number, beta: number) =>
+      buildUtilizationModel(input({ usage: [usageOf(100, 'Unattended', 1, alpha), usageOf(200, 'Unattended', 2, beta)] }))
+    expect(at(49, 51).concentration).toEqual({ name: 'Bot.Beta', sharePct: 51 })
+    expect(at(50, 50).concentration).toMatchObject({ sharePct: 50 })
+    expect(buildUtilizationModel(input({ usage: [usageOf(100, 'Unattended', 1, 40), usageOf(200, 'Unattended', 2, 35), usageOf(200, 'Unattended', 3, 25)] })).concentration).toBeNull()
+  })
+
+  it('keeps excluded folders out of the new signals too', () => {
+    const model = buildUtilizationModel(
+      input({
+        folderRuntimes: [rt(100, 'Unattended', 4, 4, 1), rt(300, 'Unattended', 9, 1, 0)],
+        usage: [usageOf(100, 'Unattended', 1, 10), usageOf(300, 'Unattended', 9, 90, { failedSec: hours(90), waitCount: 5, waitBuckets: [0, 0, 0, 0, 5] })],
+        excludedFolderIds: new Set([300]),
+      }),
+    )
+    expect(model.live).toMatchObject({ total: 4, offline: 0 })
+    expect(model.failedHours).toBe(0)
+    expect(model.wait).toBeNull()
+    expect(model.concentration).toMatchObject({ name: 'Bot.Alpha', sharePct: 100 })
   })
 })

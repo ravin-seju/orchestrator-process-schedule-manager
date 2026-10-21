@@ -234,27 +234,52 @@ const buildStressRuntimeStats = (): Map<number, RuntimeStats> => {
 export const stressRuntimeStats = buildStressRuntimeStats()
 
 // Utilization fixtures. Capacity: Finance Ops has the most counted runtimes (8 Unattended +
-// 2 Testing = 10), so 10 x 24 h x 30 days = 7,200 h. Consumed: 2,952 h on counted types (41%),
-// skewed toward Bot.Alpha. Bot.Delta only ran Development jobs, which aren't counted, so it shows in
-// the By runtime type table but not the robot table.
+// 2 Testing = 10), so 10 x 24 h x 30 days = 7,200 h; at load time 9 are connected and 5 idle, so
+// 4 busy and 1 offline. Consumed: 2,952 h on counted types (41%), skewed toward Bot.Alpha (62%, so
+// the concentration warning shows), busiest at 02:00, 4% on failed runs, and some jobs waiting
+// over 5 minutes. Bot.Delta only ran Development jobs, which aren't counted. IT Operations has
+// runtimes but no jobs, so it shows as an idle root folder.
 const hours = (h: number) => h * 3600
+// Relative load by hour of day: a night batch window peaking at 02:00 at 85% of capacity
+// (2,952 h x 12/139 / 30 days = 8.5 of 10 runtimes busy).
+const stressHourWeights = [8, 10, 12, 11, 8, 5, 4, 4, 4, 4, 5, 5, 5, 5, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6]
+const stressHourWeightSum = stressHourWeights.reduce((sum, weight) => sum + weight, 0)
+// Jobs by wait band (<1m, 1-5m, 5-15m, 15-60m, >60m) per 100 h of run time.
+const stressWaitPer100h = [60, 25, 10, 4, 1]
+const stressUsageEntry = (folderId: number, runtimeType: string, robotId: number, h: number): UsageEntry => {
+  const sec = hours(h)
+  const waitBuckets = stressWaitPer100h.map((count) => Math.round((count * h) / 100))
+  const waitCount = waitBuckets.reduce((sum, count) => sum + count, 0)
+  return {
+    folderId,
+    runtimeType,
+    robotId,
+    sec,
+    failedSec: sec * 0.04,
+    byHour: stressHourWeights.map((weight) => (sec * weight) / stressHourWeightSum),
+    waitSec: waitCount * 150,
+    waitCount,
+    waitBuckets,
+  }
+}
 export const stressFolderRuntimes: FolderRuntimeEntry[] = [
-  { folderId: 8102, runtimeType: 'Unattended', total: 8 },
-  { folderId: 8102, runtimeType: 'TestAutomation', total: 2 },
-  { folderId: 8104, runtimeType: 'Unattended', total: 6 },
-  { folderId: 8104, runtimeType: 'Serverless', total: 3 },
-  { folderId: 8101, runtimeType: 'Unattended', total: 4 },
-  { folderId: 8101, runtimeType: 'Development', total: 2 },
+  { folderId: 8102, runtimeType: 'Unattended', total: 8, connected: 7, available: 3 },
+  { folderId: 8102, runtimeType: 'TestAutomation', total: 2, connected: 2, available: 2 },
+  { folderId: 8104, runtimeType: 'Unattended', total: 6, connected: 6, available: 4 },
+  { folderId: 8104, runtimeType: 'Serverless', total: 3, connected: 3, available: 3 },
+  { folderId: 8101, runtimeType: 'Unattended', total: 4, connected: 4, available: 1 },
+  { folderId: 8101, runtimeType: 'Development', total: 2, connected: 1, available: 1 },
+  { folderId: 8105, runtimeType: 'Unattended', total: 3, connected: 2, available: 2 },
 ]
 export const stressUsage: UsageEntry[] = [
-  { folderId: 8102, runtimeType: 'Unattended', robotId: 201, sec: hours(1180) },
-  { folderId: 8102, runtimeType: 'Unattended', robotId: 202, sec: hours(148) },
-  { folderId: 8104, runtimeType: 'Serverless', robotId: 201, sec: hours(650) },
-  { folderId: 8104, runtimeType: 'Unattended', robotId: 202, sec: hours(324) },
-  { folderId: 8101, runtimeType: 'TestAutomation', robotId: 202, sec: hours(266) },
+  stressUsageEntry(8102, 'Unattended', 201, 1180),
+  stressUsageEntry(8102, 'Unattended', 202, 148),
+  stressUsageEntry(8104, 'Serverless', 201, 650),
+  stressUsageEntry(8104, 'Unattended', 202, 324),
+  stressUsageEntry(8101, 'TestAutomation', 202, 266),
   // Finance Ops/Onboarding rolls up into the Finance Ops root folder.
-  { folderId: 8103, runtimeType: 'Unattended', robotId: 203, sec: hours(384) },
-  { folderId: 8101, runtimeType: 'Development', robotId: 204, sec: hours(12) },
+  stressUsageEntry(8103, 'Unattended', 203, 384),
+  stressUsageEntry(8101, 'Development', 204, 12),
 ]
 
 const buildProcessSchedule = (

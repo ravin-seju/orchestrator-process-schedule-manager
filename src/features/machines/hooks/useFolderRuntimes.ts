@@ -8,6 +8,8 @@ const FOLDER_RUNTIMES_TTL_MS = 4 * 60 * 60 * 1000
 
 type CachedFolderRuntimes = {
   entries: FolderRuntimeEntry[]
+  // When the runtimes were read; Connected/Available are a snapshot of that moment.
+  fetchedAt: number
   folderKey: string
 }
 
@@ -19,6 +21,7 @@ const loadStressData = testingRouteEnabled ? () => import('@/features/schedules/
 // surfacing an error, so the view falls back to consumed hours only.
 export function useFolderRuntimes(sdk?: UiPath | null, tenantName?: string, folderIds?: number[]) {
   const [folderRuntimes, setFolderRuntimes] = useState<FolderRuntimeEntry[]>([])
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
   const folderKey = folderIds?.join(',') ?? ''
@@ -27,7 +30,9 @@ export function useFolderRuntimes(sdk?: UiPath | null, tenantName?: string, fold
     if (loadStressData && typeof window !== 'undefined' && isTestingPath(window.location.pathname)) {
       let isActive = true
       loadStressData().then((m) => {
-        if (isActive) setFolderRuntimes(m.stressFolderRuntimes)
+        if (!isActive) return
+        setFolderRuntimes(m.stressFolderRuntimes)
+        setFetchedAt(Date.now())
       })
       return () => { isActive = false }
     }
@@ -47,12 +52,15 @@ export function useFolderRuntimes(sdk?: UiPath | null, tenantName?: string, fold
       const revalidate = async () => {
         const entries = await loadFolderRuntimes(sdk, tenantName, folderIds)
         if (!isActive) return
-        cacheSet(key, { entries, folderKey: sortedFolderKey }, FOLDER_RUNTIMES_TTL_MS)
+        const now = Date.now()
+        cacheSet(key, { entries, fetchedAt: now, folderKey: sortedFolderKey }, FOLDER_RUNTIMES_TTL_MS)
         setFolderRuntimes(entries)
+        setFetchedAt(now)
       }
 
       if (cached && cached.data.folderKey === sortedFolderKey) {
         setFolderRuntimes(cached.data.entries)
+        setFetchedAt(cached.data.fetchedAt)
         if (cached.isStale) {
           revalidate().catch((err) => console.warn('Background folder runtime refresh failed:', err))
         }
@@ -78,5 +86,5 @@ export function useFolderRuntimes(sdk?: UiPath | null, tenantName?: string, fold
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sdk, tenantName, folderKey])
 
-  return { folderRuntimes, isLoading }
+  return { folderRuntimes, fetchedAt, isLoading }
 }

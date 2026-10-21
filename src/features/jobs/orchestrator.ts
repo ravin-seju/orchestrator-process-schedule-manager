@@ -3,6 +3,7 @@ import { fetchAllPages, settledBatch } from '@/features/orchestrator/odataClient
 import type { RuntimeStats } from '@/features/schedules/types'
 
 interface RawJob {
+  CreationTime?: string | null
   StartTime?: string | null
   EndTime?: string | null
   StartingScheduleId?: number | null
@@ -44,6 +45,36 @@ export interface UsageEntry {
   runtimeType: string | null
   robotId: number | null
   sec: number
+  // Part of sec spent on runs that ended Faulted or Stopped.
+  failedSec: number
+  // sec split by hour of day in the viewer's local time; index 0 = 00:00-01:00.
+  byHour: number[]
+  // Time from job creation to start: how long jobs waited for a robot. Counted per job in the
+  // bands of WAIT_BUCKET_LIMITS_SEC, plus a running total for the average.
+  waitSec: number
+  waitCount: number
+  waitBuckets: number[]
+}
+
+// Upper bounds of the wait-time bands: under 1 min, 1-5 min, 5-15 min, 15-60 min, then over 60 min.
+export const WAIT_BUCKET_LIMITS_SEC = [60, 300, 900, 3600] as const
+
+const waitBucket = (waitSec: number) => {
+  const index = WAIT_BUCKET_LIMITS_SEC.findIndex((limit) => waitSec < limit)
+  return index === -1 ? WAIT_BUCKET_LIMITS_SEC.length : index
+}
+
+// Adds each local hour's share of [startMs, endMs) to byHour, so a job from 01:30 to 03:15 puts
+// 30 min in hour 1, 60 min in hour 2 and 15 min in hour 3.
+const addByHour = (byHour: number[], startMs: number, endMs: number) => {
+  let t = startMs
+  while (t < endMs) {
+    const d = new Date(t)
+    const nextHour = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours() + 1).getTime()
+    const segmentEnd = Math.min(endMs, nextHour)
+    byHour[d.getHours()] += (segmentEnd - t) / 1000
+    t = segmentEnd
+  }
 }
 
 // Jobs whose machine association is meaningful — the job actually executed on a host.
@@ -70,7 +101,7 @@ const toEpoch = (iso: string | null | undefined): number | null => {
 
 async function fetchAllJobs(sdk: UiPath, tenantName: string, folderId: number, sinceIso: string): Promise<RawJob[]> {
   const path =
-    `Jobs?$select=StartTime,EndTime,StartingScheduleId,State,HostMachineName,RuntimeType&$expand=Robot($select=Id,Name),Release($select=Id)&$filter=(${EXECUTED_STATES}) and CreationTime gt ${sinceIso}&$top=200`
+    `Jobs?$select=CreationTime,StartTime,EndTime,StartingScheduleId,State,HostMachineName,RuntimeType&$expand=Robot($select=Id,Name),Release($select=Id)&$filter=(${EXECUTED_STATES}) and CreationTime gt ${sinceIso}&$top=200`
   return fetchAllPages<RawJob>(sdk, tenantName, path, folderId)
 }
 
@@ -130,9 +161,31 @@ export async function loadJobHistory(
         const runtimeType = job.RuntimeType ?? null
         const robotId = job.Robot?.Id ?? null
         const key = `${folderId}|${runtimeType}|${robotId}`
-        const entry = usageByKey.get(key)
-        if (entry) entry.sec += durationSec
-        else usageByKey.set(key, { folderId, runtimeType, robotId, sec: durationSec })
+        let entry = usageByKey.get(key)
+        if (!entry) {
+          entry = {
+            folderId,
+            runtimeType,
+            robotId,
+            sec: 0,
+            failedSec: 0,
+            byHour: new Array<number>(24).fill(0),
+            waitSec: 0,
+            waitCount: 0,
+            waitBuckets: new Array<number>(WAIT_BUCKET_LIMITS_SEC.length + 1).fill(0),
+          }
+          usageByKey.set(key, entry)
+        }
+        entry.sec += durationSec
+        if (job.State !== 'Successful') entry.failedSec += durationSec
+        addByHour(entry.byHour, start, end)
+        const created = toEpoch(job.CreationTime)
+        if (created != null && start >= created) {
+          const waitSec = (start - created) / 1000
+          entry.waitSec += waitSec
+          entry.waitCount += 1
+          entry.waitBuckets[waitBucket(waitSec)] += 1
+        }
       }
       // Duration stats use ONLY successful jobs (faulted/stopped runs would skew median/p90).
       if (job.State !== 'Successful') continue
