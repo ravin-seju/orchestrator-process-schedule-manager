@@ -6,7 +6,7 @@ export type StatusFilter = 'all' | 'enabled' | 'disabled'
 // triggers the Enabled status filter hides. Everything else maps 1:1 to a SummaryMetricKey.
 export type AttentionFilter = 'none' | 'duplicates' | 'stale' | 'collisions' | 'expiring' | 'expired'
 export type CalendarViewMode = 'year' | 'month' | 'week'
-export type WorkspaceView = 'calendar' | 'inventory'
+export type WorkspaceView = 'calendar' | 'inventory' | 'utilization'
 export type ViewMode = 'spanBars' | 'timeBlocks'
 export type RecurrenceBucket = 'minute' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'queue' | 'other'
 export type TriggerTypeFilter = 'all' | RecurrenceBucket

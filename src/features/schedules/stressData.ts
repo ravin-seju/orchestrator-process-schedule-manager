@@ -1,5 +1,7 @@
 import type { Folder, LoadSchedulesResult, ProcessSchedule, TenantInfo } from './orchestrator'
 import type { RuntimeStats, StressScheduleCount } from './types'
+import { forEachLocalHour, localDayKey, localWeekday, type UsageEntry, type UsageWindow } from '@/features/jobs/orchestrator'
+import type { FolderRuntimeEntry } from '@/features/machines/orchestrator'
 
 export const stressScheduleCounts = [5, 10, 50, 100] as const
 export const defaultStressScheduleCount: StressScheduleCount = 5
@@ -230,6 +232,87 @@ const buildStressRuntimeStats = (): Map<number, RuntimeStats> => {
 }
 
 export const stressRuntimeStats = buildStressRuntimeStats()
+
+// Utilization fixtures. Capacity: Finance Ops has the most counted runtimes (8 Unattended +
+// 2 Testing = 10), so 10 x 24 h x 30 days = 7,200 h; at load time 9 are connected and 5 idle, so
+// 4 busy and 1 offline. Consumed: 2,952 h on counted types (41%), skewed toward Bot.Alpha (62%, so
+// the concentration warning shows), busiest at 02:00, lighter at weekends, a dip 12 days ago, 4% on
+// failed runs, and some jobs waiting over 5 minutes. Bot.Delta only ran Development jobs, which
+// aren't counted. IT Operations has runtimes but no jobs, so it shows as an idle root folder.
+const hours = (h: number) => h * 3600
+// Relative load by hour of day: a night batch window peaking at 02:00 at 85% of capacity
+// (2,952 h x 12/139 / 30 days = 8.5 of 10 runtimes busy).
+const stressHourWeights = [8, 10, 12, 11, 8, 5, 4, 4, 4, 4, 5, 5, 5, 5, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6]
+const stressHourWeightSum = stressHourWeights.reduce((sum, weight) => sum + weight, 0)
+// Relative load by weekday, Monday first.
+const stressWeekdayWeights = [12, 12, 11, 11, 11, 7, 6]
+const stressWeekdayWeightSum = stressWeekdayWeights.reduce((sum, weight) => sum + weight, 0)
+// The history covers the 30 days up to page load. Each day's share follows its weekday weight and
+// how much of it is inside the window; the day 12 days back runs at 15% (an outage).
+const stressNow = Date.now()
+export const stressUsageWindow: UsageWindow = { startMs: stressNow - 30 * 24 * 3600 * 1000, endMs: stressNow }
+const stressDipDay = localDayKey(new Date(stressNow - 12 * 24 * 3600 * 1000))
+const stressDayWeights = new Map<string, number>()
+forEachLocalHour(stressUsageWindow.startMs, stressUsageWindow.endMs, (date, sec) => {
+  const day = localDayKey(date)
+  const weight = sec * stressWeekdayWeights[localWeekday(date)] * (day === stressDipDay ? 0.15 : 1)
+  stressDayWeights.set(day, (stressDayWeights.get(day) ?? 0) + weight)
+})
+const stressDayWeightSum = [...stressDayWeights.values()].reduce((sum, weight) => sum + weight, 0)
+// Every entry runs one job from 02:00 to 03:00 local on each day after the first, so the six counted
+// entries overlap and the peak is 6 runtimes at once, first reached on the second day of the window.
+// These intervals feed only the peak; the hours above come from the weights.
+const stressIntervals = Array.from({ length: 29 }, (_, index) => {
+  const runStart = new Date(stressUsageWindow.startMs)
+  runStart.setDate(runStart.getDate() + index + 1)
+  runStart.setHours(2, 0, 0, 0)
+  const offsetSec = Math.round((runStart.getTime() - stressUsageWindow.startMs) / 1000)
+  return [offsetSec, offsetSec + 3600]
+}).flat()
+// Jobs by wait band (<1m, 1-5m, 5-15m, 15-60m, >60m) per 100 h of run time.
+const stressWaitPer100h = [60, 25, 10, 4, 1]
+const stressUsageEntry = (folderId: number, runtimeType: string, robotId: number, h: number): UsageEntry => {
+  const sec = hours(h)
+  const waitBuckets = stressWaitPer100h.map((count) => Math.round((count * h) / 100))
+  const waitCount = waitBuckets.reduce((sum, count) => sum + count, 0)
+  return {
+    folderId,
+    runtimeType,
+    robotId,
+    sec,
+    failedSec: sec * 0.04,
+    byWeekdayHour: Array.from(
+      { length: 7 * 24 },
+      (_, slot) =>
+        (sec * stressHourWeights[slot % 24] * stressWeekdayWeights[Math.floor(slot / 24)]) /
+        (stressHourWeightSum * stressWeekdayWeightSum),
+    ),
+    byDay: Object.fromEntries([...stressDayWeights].map(([day, weight]) => [day, (sec * weight) / stressDayWeightSum])),
+    waitSec: waitCount * 150,
+    waitCount,
+    waitBuckets,
+    intervals: stressIntervals,
+  }
+}
+export const stressFolderRuntimes: FolderRuntimeEntry[] = [
+  { folderId: 8102, runtimeType: 'Unattended', total: 8, connected: 7, available: 3 },
+  { folderId: 8102, runtimeType: 'TestAutomation', total: 2, connected: 2, available: 2 },
+  { folderId: 8104, runtimeType: 'Unattended', total: 6, connected: 6, available: 4 },
+  { folderId: 8104, runtimeType: 'Serverless', total: 3, connected: 3, available: 3 },
+  { folderId: 8101, runtimeType: 'Unattended', total: 4, connected: 4, available: 1 },
+  { folderId: 8101, runtimeType: 'Development', total: 2, connected: 1, available: 1 },
+  { folderId: 8105, runtimeType: 'Unattended', total: 3, connected: 2, available: 2 },
+]
+export const stressUsage: UsageEntry[] = [
+  stressUsageEntry(8102, 'Unattended', 201, 1180),
+  stressUsageEntry(8102, 'Unattended', 202, 148),
+  stressUsageEntry(8104, 'Serverless', 201, 650),
+  stressUsageEntry(8104, 'Unattended', 202, 324),
+  stressUsageEntry(8101, 'TestAutomation', 202, 266),
+  // Finance Ops/Onboarding rolls up into the Finance Ops root folder.
+  stressUsageEntry(8103, 'Unattended', 203, 384),
+  stressUsageEntry(8101, 'Development', 204, 12),
+]
 
 const buildProcessSchedule = (
   bucket: StressBucket,

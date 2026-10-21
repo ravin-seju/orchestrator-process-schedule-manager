@@ -3,6 +3,7 @@ import { fetchAllPages, settledBatch } from '@/features/orchestrator/odataClient
 import type { RuntimeStats } from '@/features/schedules/types'
 
 interface RawJob {
+  CreationTime?: string | null
   StartTime?: string | null
   EndTime?: string | null
   StartingScheduleId?: number | null
@@ -10,6 +11,7 @@ interface RawJob {
   Robot?: { Id?: number | null; Name?: string | null } | null
   Release?: { Id?: number | null } | null
   HostMachineName?: string | null
+  RuntimeType?: string | null
 }
 
 interface DurationRow {
@@ -32,7 +34,74 @@ export interface JobHistoryResult {
   // ReleaseId → machine keys from MANUAL runs (no StartingScheduleId). Used as a
   // fallback so manual-only schedules still show a (process-level) machine.
   releaseMachineIds: Map<number, number[]>
+  // Robot-busy seconds over the window for the Utilization view, one entry per folder, runtime
+  // type and robot. Covers every executed job (Successful, Faulted, Stopped): a faulted or stopped
+  // run still held its robot. Which types and folders count is decided by the model, not here.
+  usage: UsageEntry[]
+  // The span of job creation times the history covers, so averages can divide by the hours and
+  // days actually in the window.
+  window: UsageWindow
 }
+
+export interface UsageWindow {
+  startMs: number
+  endMs: number
+}
+
+export interface UsageEntry {
+  folderId: number
+  runtimeType: string | null
+  robotId: number | null
+  sec: number
+  // Part of sec spent on runs that ended Faulted or Stopped.
+  failedSec: number
+  // sec split by local weekday and hour: index = weekday * 24 + hour, Monday = weekday 0.
+  byWeekdayHour: number[]
+  // sec split by local calendar day, keyed YYYY-MM-DD.
+  byDay: Record<string, number>
+  // Time from job creation to start: how long jobs waited for a robot. Counted per job in the
+  // bands of WAIT_BUCKET_LIMITS_SEC, plus a running total for the average.
+  waitSec: number
+  waitCount: number
+  waitBuckets: number[]
+  // Each run as start and end, in whole seconds from the window start: [start, end, start, end, …].
+  // Kept so the model can count how many runs overlapped at once across the entries it counts.
+  intervals: number[]
+}
+
+// Upper bounds of the wait-time bands: under 1 min, 1-5 min, 5-15 min, 15-60 min, then over 60 min.
+export const WAIT_BUCKET_LIMITS_SEC = [60, 300, 900, 3600] as const
+
+const waitBucket = (waitSec: number) => {
+  const index = WAIT_BUCKET_LIMITS_SEC.findIndex((limit) => waitSec < limit)
+  return index === -1 ? WAIT_BUCKET_LIMITS_SEC.length : index
+}
+
+// Monday = 0 ... Sunday = 6, in local time.
+export const localWeekday = (date: Date) => (date.getDay() + 6) % 7
+
+export const localDayKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+// Walks [startMs, endMs) one local clock hour at a time, so a job from 01:30 to 03:15 gives
+// 30 min to hour 1, 60 min to hour 2 and 15 min to hour 3, each on the right weekday and day.
+export const forEachLocalHour = (startMs: number, endMs: number, visit: (date: Date, sec: number) => void) => {
+  let t = startMs
+  while (t < endMs) {
+    const d = new Date(t)
+    const nextHour = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours() + 1).getTime()
+    const segmentEnd = Math.min(endMs, nextHour)
+    visit(d, (segmentEnd - t) / 1000)
+    t = segmentEnd
+  }
+}
+
+const addByTime = (entry: UsageEntry, startMs: number, endMs: number) =>
+  forEachLocalHour(startMs, endMs, (date, sec) => {
+    entry.byWeekdayHour[localWeekday(date) * 24 + date.getHours()] += sec
+    const day = localDayKey(date)
+    entry.byDay[day] = (entry.byDay[day] ?? 0) + sec
+  })
 
 // Jobs whose machine association is meaningful — the job actually executed on a host.
 // Excludes never-ran states (Pending/Running/Cancelled/etc.) to avoid phantom machines.
@@ -58,7 +127,7 @@ const toEpoch = (iso: string | null | undefined): number | null => {
 
 async function fetchAllJobs(sdk: UiPath, tenantName: string, folderId: number, sinceIso: string): Promise<RawJob[]> {
   const path =
-    `Jobs?$select=StartTime,EndTime,StartingScheduleId,State,HostMachineName&$expand=Robot($select=Id,Name),Release($select=Id)&$filter=(${EXECUTED_STATES}) and CreationTime gt ${sinceIso}&$top=200`
+    `Jobs?$select=CreationTime,StartTime,EndTime,StartingScheduleId,State,HostMachineName,RuntimeType&$expand=Robot($select=Id,Name),Release($select=Id)&$filter=(${EXECUTED_STATES}) and CreationTime gt ${sinceIso}&$top=200`
   return fetchAllPages<RawJob>(sdk, tenantName, path, folderId)
 }
 
@@ -70,6 +139,7 @@ export async function loadJobHistory(
 ): Promise<JobHistoryResult> {
   const sinceDate = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000)
   const sinceIso = sinceDate.toISOString()
+  const sinceMs = sinceDate.getTime()
 
   const settled = await settledBatch(
     folderIds,
@@ -82,8 +152,11 @@ export async function loadJobHistory(
   const machineNames = new Map<number, string>()
   const scheduleMachineSets = new Map<number, Set<number>>()
   const releaseMachineSets = new Map<number, Set<number>>()
-  for (const result of settled) {
+  const usageByKey = new Map<string, UsageEntry>()
+  // settledBatch keeps input order, so settled[i] holds folderIds[i]'s jobs.
+  for (const [index, result] of settled.entries()) {
     if (result.status !== 'fulfilled') continue
+    const folderId = folderIds[index]
     for (const job of result.value) {
       if (job.Robot?.Id != null && job.Robot.Name) {
         robotNames.set(job.Robot.Id, job.Robot.Name)
@@ -106,13 +179,46 @@ export async function loadJobHistory(
           releaseMachineSets.set(job.Release.Id, set)
         }
       }
-      // Duration stats use ONLY successful jobs (faulted/stopped runs would skew median/p90).
-      if (job.State !== 'Successful') continue
       const start = toEpoch(job.StartTime)
       const end = toEpoch(job.EndTime)
       if (start == null || end == null) continue
       const durationSec = (end - start) / 1000
       if (durationSec <= 0) continue
+      if (folderId != null) {
+        const runtimeType = job.RuntimeType ?? null
+        const robotId = job.Robot?.Id ?? null
+        const key = `${folderId}|${runtimeType}|${robotId}`
+        let entry = usageByKey.get(key)
+        if (!entry) {
+          entry = {
+            folderId,
+            runtimeType,
+            robotId,
+            sec: 0,
+            failedSec: 0,
+            byWeekdayHour: new Array<number>(7 * 24).fill(0),
+            byDay: {},
+            waitSec: 0,
+            waitCount: 0,
+            waitBuckets: new Array<number>(WAIT_BUCKET_LIMITS_SEC.length + 1).fill(0),
+            intervals: [],
+          }
+          usageByKey.set(key, entry)
+        }
+        entry.sec += durationSec
+        entry.intervals.push(Math.round((start - sinceMs) / 1000), Math.round((end - sinceMs) / 1000))
+        if (job.State !== 'Successful') entry.failedSec += durationSec
+        addByTime(entry, start, end)
+        const created = toEpoch(job.CreationTime)
+        if (created != null && start >= created) {
+          const waitSec = (start - created) / 1000
+          entry.waitSec += waitSec
+          entry.waitCount += 1
+          entry.waitBuckets[waitBucket(waitSec)] += 1
+        }
+      }
+      // Duration stats use ONLY successful jobs (faulted/stopped runs would skew median/p90).
+      if (job.State !== 'Successful') continue
       rows.push({
         scheduleId: job.StartingScheduleId ?? null,
         durationSec,
@@ -129,7 +235,15 @@ export async function loadJobHistory(
     releaseMachineIds.set(releaseId, [...set])
   }
 
-  return { rows, robotNames, machineNames, scheduleMachineIds, releaseMachineIds }
+  return {
+    rows,
+    robotNames,
+    machineNames,
+    scheduleMachineIds,
+    releaseMachineIds,
+    usage: [...usageByKey.values()],
+    window: { startMs: sinceMs, endMs: Date.now() },
+  }
 }
 
 export function aggregateRuntimes(rows: DurationRow[]): Map<number, RuntimeStats> {

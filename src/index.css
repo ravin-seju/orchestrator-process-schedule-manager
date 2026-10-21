@@ -100,6 +100,7 @@
   --metric-robots: #c2476e;
   --metric-suppressed: var(--orange);
   --metric-expiring: var(--warning);
+  --metric-utilization: #2563eb;
   --env-alpha-accent: #7c3aed;
   --dense-cluster-bg: #fff0e9;
   --dense-cluster-border: color-mix(in srgb, var(--orange) 58%, var(--border));
@@ -191,6 +192,7 @@
   --metric-robots: #ff7aa8;
   --metric-suppressed: var(--orange);
   --metric-expiring: var(--warning);
+  --metric-utilization: #60a5fa;
   --env-alpha-accent: #a78bfa;
   --font-xxs: 10px;
   --font-xs: 11px;
@@ -2161,6 +2163,16 @@ h3 {
   padding: 6px 0 4px;
 }
 
+/* The toggle groups clip their overflow, which lets an auto grid track shrink them below their
+   buttons. While their tracks are auto (wider than the 1280px breakpoint below), hold them at
+   content width so the flexible filter columns give way instead. */
+@media (min-width: 1281px) {
+  .control-band > .segmented-control,
+  .control-band > .view-switcher {
+    min-width: max-content;
+  }
+}
+
 .search-control {
   align-items: center;
   background: var(--surface-soft);
@@ -2390,7 +2402,7 @@ h3 {
 }
 
 .view-switcher {
-  grid-template-columns: repeat(2, minmax(86px, 1fr));
+  grid-template-columns: repeat(3, minmax(86px, 1fr));
 }
 
 .calendar-view-toggle {
@@ -2466,6 +2478,478 @@ h3 {
   min-height: 0;
   overflow: hidden;
   padding: 4px 0 8px;
+}
+
+/* Utilization view: fills the workspace slot the inventory uses without scrolling the page.
+   The headline, charts and chips keep their height; the collapsible tables take the rest and
+   scroll inside it when opened. */
+.utilization-view {
+  display: grid;
+  grid-area: workspace;
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px 0 8px;
+}
+
+.utilization-panel {
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 84%, var(--accent) 16%);
+  border-radius: 14px;
+  box-shadow: var(--shadow-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px 18px 16px;
+}
+
+.utilization-panel > * {
+  flex: 0 0 auto;
+}
+
+.utilization-info {
+  align-items: center;
+  color: var(--text-muted);
+  cursor: help;
+  display: inline-flex;
+  margin-left: 2px;
+  vertical-align: -2px;
+}
+
+.utilization-info:focus-visible {
+  border-radius: 4px;
+  box-shadow: var(--focus);
+  outline: none;
+}
+
+.utilization-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  justify-content: space-between;
+}
+
+.utilization-title {
+  align-items: center;
+  color: var(--text-strong);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.utilization-title h2 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.utilization-scope,
+.utilization-caveat {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+.utilization-caveat {
+  margin: 0;
+}
+
+.utilization-source {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  border-radius: 999px;
+  /* Pure --success on its own tint is under 4.5:1 at this size in light mode; leaning toward
+     --text-strong darkens it in light and lightens it in dark. */
+  color: color-mix(in srgb, var(--success) 65%, var(--text-strong));
+  font-size: var(--font-xs);
+  font-weight: 600;
+  padding: 3px 10px;
+}
+
+.utilization-source[data-source='none'],
+.utilization-source[data-source='loading'] {
+  background: var(--surface-soft);
+  color: var(--text-muted);
+}
+
+.utilization-tiles {
+  flex-wrap: wrap;
+  row-gap: 12px;
+}
+
+/* Four chart cards in one row under the meter. */
+.utilization-charts {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.utilization-chart {
+  align-content: start;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.utilization-chart-head {
+  align-items: baseline;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--font-xs);
+  gap: 0 8px;
+  justify-content: space-between;
+}
+
+.utilization-chart-head strong {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.utilization-chart-bars {
+  align-items: flex-end;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 2px;
+  height: 64px;
+  position: relative;
+}
+
+.utilization-chart-bars-wide {
+  gap: 8px;
+}
+
+.utilization-chart-bar {
+  background: color-mix(in srgb, var(--metric-utilization) 45%, transparent);
+  border-radius: 2px 2px 0 0;
+  flex: 1 1 0;
+}
+
+.utilization-chart-bar[data-mark='peak'] {
+  background: var(--teal);
+}
+
+.utilization-chart-bar[data-mark='low'] {
+  background: var(--danger);
+}
+
+.utilization-chart-bar[data-mark='warn'] {
+  background: var(--orange);
+}
+
+.utilization-chart-capacity {
+  border-top: 1px dashed var(--text-muted);
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+}
+
+.utilization-chart-axis {
+  color: var(--text-muted);
+  display: flex;
+  font-size: var(--font-xs);
+  justify-content: space-between;
+}
+
+/* One label under each bar. */
+.utilization-chart-axis-even {
+  display: grid;
+  gap: 8px;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* Clears the weekday letters so the hours line up with the cells. */
+.utilization-chart-axis-week {
+  padding-left: 11px;
+}
+
+.utilization-week {
+  display: grid;
+  gap: 1px;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
+  height: 64px;
+}
+
+.utilization-week-row {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: 10px repeat(24, minmax(0, 1fr));
+}
+
+.utilization-week-day {
+  color: var(--text-muted);
+  font-size: 8px;
+  line-height: 1;
+}
+
+.utilization-week-cell {
+  background: var(--surface-soft);
+  border-radius: 1px;
+}
+
+.utilization-week-cell[data-quiet='true'] {
+  box-shadow: inset 0 0 0 1px var(--text-strong);
+}
+
+.utilization-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.utilization-chip {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  display: inline-flex;
+  font-size: var(--font-xs);
+  gap: 4px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.utilization-chip[data-warn='true'] {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  color: color-mix(in srgb, var(--warning) 70%, var(--text-strong));
+}
+
+.utilization-chip-muted {
+  color: var(--text-muted);
+}
+
+.utilization-idle-tag {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--font-xxs);
+  margin-left: 6px;
+  padding: 0 6px;
+}
+
+.utilization-meter {
+  background: var(--surface-soft);
+  border-radius: 5px;
+  height: 10px;
+  position: relative;
+}
+
+.utilization-meter-fill {
+  border-radius: 5px;
+  display: block;
+  height: 100%;
+}
+
+.utilization-meter-tick {
+  background: var(--text-muted);
+  bottom: -3px;
+  opacity: 0.5;
+  position: absolute;
+  top: -3px;
+  width: 1px;
+}
+
+.utilization-meter-scale {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  height: 14px;
+  margin-top: 4px;
+  position: relative;
+}
+
+.utilization-meter-scale span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.utilization-meter-scale span:first-child {
+  transform: none;
+}
+
+.utilization-meter-scale span:last-child {
+  transform: translateX(-100%);
+}
+
+/* The collapsible tables share the height left under the chips. Collapsed, each is one summary
+   line; opened tables stack, each capped and scrolling inside itself, and the stack scrolls when
+   it outgrows the space. */
+.utilization-panel > .utilization-body {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+.utilization-table-block {
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.utilization-table-summary {
+  align-items: baseline;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  list-style: none;
+  padding: 6px 2px;
+}
+
+.utilization-table-summary::-webkit-details-marker {
+  display: none;
+}
+
+.utilization-table-summary::before {
+  color: var(--text-muted);
+  content: '\25B8';
+  font-size: 12px;
+}
+
+.utilization-table-block[open] > .utilization-table-summary::before {
+  transform: rotate(90deg);
+}
+
+.utilization-table-summary:focus-visible {
+  border-radius: 4px;
+  box-shadow: var(--focus);
+  outline: none;
+}
+
+.utilization-table-summary h3 {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  margin: 0;
+}
+
+.utilization-table-summary-text {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  margin-left: 4px;
+}
+
+.utilization-table-scroll {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.utilization-share-bar {
+  background: var(--surface-soft);
+  border-radius: 3px;
+  display: block;
+  height: 6px;
+  overflow: hidden;
+}
+
+.utilization-share-bar > span {
+  background: var(--metric-utilization);
+  display: block;
+  height: 100%;
+}
+
+/* In a narrow cell the type name truncates and the "+N" count stays visible. */
+.utilization-type-list {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.utilization-type-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.utilization-type-list .table-more {
+  flex: 0 0 auto;
+}
+
+/* The calculation tooltips run to two or three sentences. */
+.ui-tooltip-content.utilization-hint {
+  max-width: 360px;
+}
+
+.inventory-table tr[data-counted='false'] td,
+.inventory-table .utilization-folder-count {
+  color: var(--text-muted);
+}
+
+.inventory-table .utilization-empty {
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Narrower windows: the chips drop their muted detail (still in each tooltip) so they keep to
+   one row. */
+@media (max-width: 1100px) {
+  .utilization-chip-muted {
+    display: none;
+  }
+}
+
+/* Short windows: a tighter headline leaves the tables their share of the height. */
+@media (max-height: 760px) {
+  .utilization-panel {
+    gap: 8px;
+    padding-bottom: 12px;
+    padding-top: 10px;
+  }
+
+  .utilization-tiles .header-metric-item strong {
+    font-size: 22px;
+  }
+
+  .utilization-chart-bars,
+  .utilization-week {
+    height: 52px;
+  }
+
+  .utilization-week-day {
+    font-size: 7px;
+  }
+
+  .utilization-meter-scale {
+    display: none;
+  }
+}
+
+/* On narrow screens the charts wrap two to a row and can't share one screen height with the
+   tables, so the whole view scrolls instead. */
+@media (max-width: 900px) {
+  .utilization-view {
+    overflow: auto;
+  }
+
+  .utilization-panel {
+    overflow: visible;
+  }
+
+  .utilization-panel > .utilization-body {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  .utilization-charts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .utilization-charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .calendar-panel,
@@ -4719,7 +5203,10 @@ button.year-day {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .view-switcher,
+  .view-switcher {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .calendar-view-toggle {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -5595,6 +6082,12 @@ html[data-design='data-workspace-console'] .inventory-table tbody td {
   .control-band {
     grid-template-columns:
       minmax(220px, 1.5fr) minmax(130px, 1fr) minmax(130px, 1fr) auto;
+  }
+
+  /* Second row holds trigger type, status and the view switcher, leaving the auto column empty;
+     the three-way switcher takes it rather than clipping inside one 1fr cell. */
+  .control-band > .view-switcher {
+    grid-column: span 2;
   }
 }
 
