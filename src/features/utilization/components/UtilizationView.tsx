@@ -97,8 +97,9 @@ function SourceBadge({ model, isLoading }: { model: UtilizationModel; isLoading:
       </TooltipTrigger>
       <TooltipContent className="utilization-hint">
         The most {COUNTED_TYPES_TEXT} deployed to any one folder
-        {model.capacityFolderName ? ` (${model.capacityFolderName})` : ''}. Folder totals are not added together,
-        because a machine shared by several folders appears in each of them, so the real capacity can be higher.
+        {model.capacityFolderName ? ` (${model.capacityFolderName})` : ''}. A machine template counts the runtimes of
+        every host connected through it when runtimes were read. Folder totals are not added together, because a
+        machine shared by several folders appears in each of them, so the real capacity can be higher.
       </TooltipContent>
     </Tooltip>
   )

@@ -44,6 +44,16 @@ describe('loadFolderRuntimes', () => {
     ])
   })
 
+  it('counts every connected host of a machine template, not just its per-host runtimes', async () => {
+    // A 1-runtime template with ten hosts online, and a 2-runtime one with none.
+    byFolder({ 100: runtimes([['Unattended', 1, 10, 8], ['TestAutomation', 2, 0, 0]]) })
+
+    expect(await loadFolderRuntimes(sdk, 'Demo', [100])).toEqual([
+      { folderId: 100, runtimeType: 'Unattended', total: 10, connected: 10, available: 8 },
+      { folderId: 100, runtimeType: 'TestAutomation', total: 2, connected: 0, available: 0 },
+    ])
+  })
+
   it('asks for each folder by path, with no folder header', async () => {
     byFolder({ 100: runtimes([['Unattended', 1]]) })
 

@@ -39,11 +39,15 @@ export async function loadFolderRuntimes(
   for (const [index, result] of settled.entries()) {
     if (result.status !== 'fulfilled') continue
     for (const row of result.value.value ?? []) {
-      if (!row.Type || !row.Total) continue
+      // For a machine template, Total is the runtimes configured per host, while Connected and
+      // Available count the runtimes of every host connected through it: a 1-runtime template with
+      // ten hosts online reports Total 1, Connected 10. The larger of the two is the lower bound.
+      const total = Math.max(row.Total ?? 0, row.Connected ?? 0)
+      if (!row.Type || !total) continue
       entries.push({
         folderId: folderIds[index],
         runtimeType: row.Type,
-        total: row.Total,
+        total,
         connected: row.Connected ?? 0,
         available: row.Available ?? 0,
       })
