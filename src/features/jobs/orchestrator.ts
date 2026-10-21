@@ -38,6 +38,14 @@ export interface JobHistoryResult {
   // type and robot. Covers every executed job (Successful, Faulted, Stopped): a faulted or stopped
   // run still held its robot. Which types and folders count is decided by the model, not here.
   usage: UsageEntry[]
+  // The span of job creation times the history covers, so averages can divide by the hours and
+  // days actually in the window.
+  window: UsageWindow
+}
+
+export interface UsageWindow {
+  startMs: number
+  endMs: number
 }
 
 export interface UsageEntry {
@@ -47,8 +55,10 @@ export interface UsageEntry {
   sec: number
   // Part of sec spent on runs that ended Faulted or Stopped.
   failedSec: number
-  // sec split by hour of day in the viewer's local time; index 0 = 00:00-01:00.
-  byHour: number[]
+  // sec split by local weekday and hour: index = weekday * 24 + hour, Monday = weekday 0.
+  byWeekdayHour: number[]
+  // sec split by local calendar day, keyed YYYY-MM-DD.
+  byDay: Record<string, number>
   // Time from job creation to start: how long jobs waited for a robot. Counted per job in the
   // bands of WAIT_BUCKET_LIMITS_SEC, plus a running total for the average.
   waitSec: number
@@ -64,18 +74,31 @@ const waitBucket = (waitSec: number) => {
   return index === -1 ? WAIT_BUCKET_LIMITS_SEC.length : index
 }
 
-// Adds each local hour's share of [startMs, endMs) to byHour, so a job from 01:30 to 03:15 puts
-// 30 min in hour 1, 60 min in hour 2 and 15 min in hour 3.
-const addByHour = (byHour: number[], startMs: number, endMs: number) => {
+// Monday = 0 ... Sunday = 6, in local time.
+export const localWeekday = (date: Date) => (date.getDay() + 6) % 7
+
+export const localDayKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+// Walks [startMs, endMs) one local clock hour at a time, so a job from 01:30 to 03:15 gives
+// 30 min to hour 1, 60 min to hour 2 and 15 min to hour 3, each on the right weekday and day.
+export const forEachLocalHour = (startMs: number, endMs: number, visit: (date: Date, sec: number) => void) => {
   let t = startMs
   while (t < endMs) {
     const d = new Date(t)
     const nextHour = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours() + 1).getTime()
     const segmentEnd = Math.min(endMs, nextHour)
-    byHour[d.getHours()] += (segmentEnd - t) / 1000
+    visit(d, (segmentEnd - t) / 1000)
     t = segmentEnd
   }
 }
+
+const addByTime = (entry: UsageEntry, startMs: number, endMs: number) =>
+  forEachLocalHour(startMs, endMs, (date, sec) => {
+    entry.byWeekdayHour[localWeekday(date) * 24 + date.getHours()] += sec
+    const day = localDayKey(date)
+    entry.byDay[day] = (entry.byDay[day] ?? 0) + sec
+  })
 
 // Jobs whose machine association is meaningful — the job actually executed on a host.
 // Excludes never-ran states (Pending/Running/Cancelled/etc.) to avoid phantom machines.
@@ -169,7 +192,8 @@ export async function loadJobHistory(
             robotId,
             sec: 0,
             failedSec: 0,
-            byHour: new Array<number>(24).fill(0),
+            byWeekdayHour: new Array<number>(7 * 24).fill(0),
+            byDay: {},
             waitSec: 0,
             waitCount: 0,
             waitBuckets: new Array<number>(WAIT_BUCKET_LIMITS_SEC.length + 1).fill(0),
@@ -178,7 +202,7 @@ export async function loadJobHistory(
         }
         entry.sec += durationSec
         if (job.State !== 'Successful') entry.failedSec += durationSec
-        addByHour(entry.byHour, start, end)
+        addByTime(entry, start, end)
         const created = toEpoch(job.CreationTime)
         if (created != null && start >= created) {
           const waitSec = (start - created) / 1000
@@ -205,7 +229,15 @@ export async function loadJobHistory(
     releaseMachineIds.set(releaseId, [...set])
   }
 
-  return { rows, robotNames, machineNames, scheduleMachineIds, releaseMachineIds, usage: [...usageByKey.values()] }
+  return {
+    rows,
+    robotNames,
+    machineNames,
+    scheduleMachineIds,
+    releaseMachineIds,
+    usage: [...usageByKey.values()],
+    window: { startMs: sinceDate.getTime(), endMs: Date.now() },
+  }
 }
 
 export function aggregateRuntimes(rows: DurationRow[]): Map<number, RuntimeStats> {

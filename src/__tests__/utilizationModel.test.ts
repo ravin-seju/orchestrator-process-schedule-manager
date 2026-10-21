@@ -17,8 +17,9 @@ const usageOf = (
   robotId,
   sec: hours(h),
   failedSec: 0,
-  // All of it in the 10:00 hour unless a test says otherwise.
-  byHour: Array.from({ length: 24 }, (_, hour) => (hour === 10 ? hours(h) : 0)),
+  // All of it on Monday in the 10:00 hour unless a test says otherwise.
+  byWeekdayHour: Array.from({ length: 7 * 24 }, (_, slot) => (slot === 10 ? hours(h) : 0)),
+  byDay: {},
   waitSec: 0,
   waitCount: 0,
   waitBuckets: [0, 0, 0, 0, 0],
@@ -38,6 +39,7 @@ const input = (overrides: Partial<UtilizationInput> = {}): UtilizationInput => (
   usage: [usageOf(100, 'Unattended', 1, 1800), usageOf(200, 'Unattended', 2, 720), usageOf(200, 'Serverless', 2, 360)],
   excludedFolderIds: new Set(),
   sinceDays: 30,
+  usageWindow: null,
   robotNames: new Map([[1, 'Bot.Alpha'], [2, 'Bot.Beta']]),
   folderNames: new Map([[100, 'Finance'], [200, 'Shared']]),
   ...overrides,
@@ -233,13 +235,61 @@ describe('buildUtilizationModel operational signals', () => {
     expect(model.rootFolders[0]).toMatchObject({ name: 'Finance', runtimes: 8, idle: false })
   })
 
-  it('finds the peak hour as average busy runtimes against capacity', () => {
-    const byHour = Array.from({ length: 24 }, (_, hour) => (hour === 2 ? hours(240) : hour === 14 ? hours(60) : 0))
-    const model = buildUtilizationModel(input({ usage: [usageOf(100, 'Unattended', 1, 300, { byHour })] }))
+  it('finds the peak hour as average busy runtimes against capacity, across weekdays', () => {
+    // 02:00 split over Monday and Saturday; 14:00 on Wednesday.
+    const byWeekdayHour = Array.from({ length: 7 * 24 }, (_, slot) =>
+      slot === 2 ? hours(200) : slot === 5 * 24 + 2 ? hours(40) : slot === 2 * 24 + 14 ? hours(60) : 0,
+    )
+    const model = buildUtilizationModel(input({ usage: [usageOf(100, 'Unattended', 1, 300, { byWeekdayHour })] }))
     // 240 h in the 02:00 hour over 30 days = 8 runtimes busy on average, of 10.
     expect(model.peakHour).toEqual({ hour: 2, avgBusy: 8, pctOfCapacity: 80 })
     expect(model.hourly[14].avgBusy).toBe(2)
     expect(model.hourly).toHaveLength(24)
+  })
+
+  // Two whole weeks, Monday 5 to Monday 19 October 2026 in local time, so every weekday and hour
+  // occurs twice.
+  const twoWeeks = { startMs: new Date(2026, 9, 5).getTime(), endMs: new Date(2026, 9, 19).getTime() }
+
+  it('averages each weekday and hour over the times it occurs in the window', () => {
+    const wednesday1500 = 2 * 24 + 15
+    // 2 h in every slot (1 runtime busy on average), except 30 min on Wednesday at 15:00.
+    const byWeekdayHour = Array.from({ length: 7 * 24 }, (_, slot) => (slot === wednesday1500 ? hours(0.5) : hours(2)))
+    const total = byWeekdayHour.reduce((sum, sec) => sum + sec, 0) / 3600
+    const model = buildUtilizationModel(
+      input({ usage: [usageOf(100, 'Unattended', 1, total, { byWeekdayHour })], usageWindow: twoWeeks }),
+    )
+    expect(model.week).toHaveLength(168)
+    expect(model.week[0]).toEqual({ weekday: 0, hour: 0, avgBusy: 1, pctOfCapacity: 10 })
+    expect(model.quietestSlot).toEqual({ weekday: 2, hour: 15, avgBusy: 0.25, pctOfCapacity: 2.5 })
+  })
+
+  it('averages each day over the part of it inside the window, and skips partial days for the lowest', () => {
+    // Noon on 5 October to noon on 8 October: the first and last days are half inside.
+    const usageWindow = { startMs: new Date(2026, 9, 5, 12).getTime(), endMs: new Date(2026, 9, 8, 12).getTime() }
+    const byDay = { '2026-10-05': hours(6), '2026-10-06': hours(48), '2026-10-07': hours(24), '2026-10-08': hours(60) }
+    const model = buildUtilizationModel(input({ usage: [usageOf(100, 'Unattended', 1, 138, { byDay })], usageWindow }))
+    expect(model.daily).toEqual([
+      { day: '2026-10-05', hours: 6, avgBusy: 0.5, pctOfCapacity: 5, full: false },
+      { day: '2026-10-06', hours: 48, avgBusy: 2, pctOfCapacity: 20, full: true },
+      { day: '2026-10-07', hours: 24, avgBusy: 1, pctOfCapacity: 10, full: true },
+      { day: '2026-10-08', hours: 60, avgBusy: 5, pctOfCapacity: 50, full: false },
+    ])
+    expect(model.lowestDay?.day).toBe('2026-10-07')
+  })
+
+  it('shows days with no counted jobs as zero', () => {
+    const model = buildUtilizationModel(input({ usageWindow: twoWeeks }))
+    expect(model.daily).toHaveLength(14)
+    expect(model.daily.every((day) => day.hours === 0 && day.full)).toBe(true)
+  })
+
+  it('has no weekly or daily figures without a window', () => {
+    const model = buildUtilizationModel(input())
+    expect(model.week).toEqual([])
+    expect(model.quietestSlot).toBeNull()
+    expect(model.daily).toEqual([])
+    expect(model.lowestDay).toBeNull()
   })
 
   it('summarises waits as an average and the share over 5 minutes', () => {
@@ -251,7 +301,7 @@ describe('buildUtilizationModel operational signals', () => {
         ],
       }),
     )
-    expect(model.wait).toEqual({ jobCount: 4, avgWaitMin: 5, over5MinPct: 25 })
+    expect(model.wait).toEqual({ jobCount: 4, avgWaitMin: 5, over5MinPct: 25, bands: [2, 1, 1, 0, 0] })
   })
 
   it('has no wait summary when no job had a usable creation time', () => {

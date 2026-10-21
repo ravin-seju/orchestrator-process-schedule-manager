@@ -1,6 +1,6 @@
 import type { Folder, LoadSchedulesResult, ProcessSchedule, TenantInfo } from './orchestrator'
 import type { RuntimeStats, StressScheduleCount } from './types'
-import type { UsageEntry } from '@/features/jobs/orchestrator'
+import { forEachLocalHour, localDayKey, localWeekday, type UsageEntry, type UsageWindow } from '@/features/jobs/orchestrator'
 import type { FolderRuntimeEntry } from '@/features/machines/orchestrator'
 
 export const stressScheduleCounts = [5, 10, 50, 100] as const
@@ -236,14 +236,29 @@ export const stressRuntimeStats = buildStressRuntimeStats()
 // Utilization fixtures. Capacity: Finance Ops has the most counted runtimes (8 Unattended +
 // 2 Testing = 10), so 10 x 24 h x 30 days = 7,200 h; at load time 9 are connected and 5 idle, so
 // 4 busy and 1 offline. Consumed: 2,952 h on counted types (41%), skewed toward Bot.Alpha (62%, so
-// the concentration warning shows), busiest at 02:00, 4% on failed runs, and some jobs waiting
-// over 5 minutes. Bot.Delta only ran Development jobs, which aren't counted. IT Operations has
-// runtimes but no jobs, so it shows as an idle root folder.
+// the concentration warning shows), busiest at 02:00, lighter at weekends, a dip 12 days ago, 4% on
+// failed runs, and some jobs waiting over 5 minutes. Bot.Delta only ran Development jobs, which
+// aren't counted. IT Operations has runtimes but no jobs, so it shows as an idle root folder.
 const hours = (h: number) => h * 3600
 // Relative load by hour of day: a night batch window peaking at 02:00 at 85% of capacity
 // (2,952 h x 12/139 / 30 days = 8.5 of 10 runtimes busy).
 const stressHourWeights = [8, 10, 12, 11, 8, 5, 4, 4, 4, 4, 5, 5, 5, 5, 4, 4, 4, 4, 5, 5, 5, 6, 6, 6]
 const stressHourWeightSum = stressHourWeights.reduce((sum, weight) => sum + weight, 0)
+// Relative load by weekday, Monday first.
+const stressWeekdayWeights = [12, 12, 11, 11, 11, 7, 6]
+const stressWeekdayWeightSum = stressWeekdayWeights.reduce((sum, weight) => sum + weight, 0)
+// The history covers the 30 days up to page load. Each day's share follows its weekday weight and
+// how much of it is inside the window; the day 12 days back runs at 15% (an outage).
+const stressNow = Date.now()
+export const stressUsageWindow: UsageWindow = { startMs: stressNow - 30 * 24 * 3600 * 1000, endMs: stressNow }
+const stressDipDay = localDayKey(new Date(stressNow - 12 * 24 * 3600 * 1000))
+const stressDayWeights = new Map<string, number>()
+forEachLocalHour(stressUsageWindow.startMs, stressUsageWindow.endMs, (date, sec) => {
+  const day = localDayKey(date)
+  const weight = sec * stressWeekdayWeights[localWeekday(date)] * (day === stressDipDay ? 0.15 : 1)
+  stressDayWeights.set(day, (stressDayWeights.get(day) ?? 0) + weight)
+})
+const stressDayWeightSum = [...stressDayWeights.values()].reduce((sum, weight) => sum + weight, 0)
 // Jobs by wait band (<1m, 1-5m, 5-15m, 15-60m, >60m) per 100 h of run time.
 const stressWaitPer100h = [60, 25, 10, 4, 1]
 const stressUsageEntry = (folderId: number, runtimeType: string, robotId: number, h: number): UsageEntry => {
@@ -256,7 +271,13 @@ const stressUsageEntry = (folderId: number, runtimeType: string, robotId: number
     robotId,
     sec,
     failedSec: sec * 0.04,
-    byHour: stressHourWeights.map((weight) => (sec * weight) / stressHourWeightSum),
+    byWeekdayHour: Array.from(
+      { length: 7 * 24 },
+      (_, slot) =>
+        (sec * stressHourWeights[slot % 24] * stressWeekdayWeights[Math.floor(slot / 24)]) /
+        (stressHourWeightSum * stressWeekdayWeightSum),
+    ),
+    byDay: Object.fromEntries([...stressDayWeights].map(([day, weight]) => [day, (sec * weight) / stressDayWeightSum])),
     waitSec: waitCount * 150,
     waitCount,
     waitBuckets,

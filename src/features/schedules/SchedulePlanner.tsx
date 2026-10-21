@@ -236,6 +236,7 @@ function Dashboard({
     scheduleMachineIds,
     releaseMachineIds,
     usage,
+    usageWindow,
     isLoading: isJobHistoryLoading,
   } = useJobRuntimes(sdk, runtimeTenant, runtimeFolderIds.length ? runtimeFolderIds : undefined, utilizationSinceDays)
   // Personal workspaces run people's own robots, not the shared fleet, so Utilization leaves them out.
@@ -259,12 +260,13 @@ function Dashboard({
         usage,
         excludedFolderIds: personalFolderIds,
         sinceDays: utilizationSinceDays,
+        usageWindow,
         robotNames,
         folderNames: new Map(
           folders.map((folder) => [folder.Id, folder.FullyQualifiedName || folder.DisplayName || `Folder ${folder.Id}`]),
         ),
       }),
-    [folderRuntimes, usage, personalFolderIds, robotNames, folders],
+    [folderRuntimes, usage, usageWindow, personalFolderIds, robotNames, folders],
   )
   // Effective machine-per-schedule: direct scheduled-job machines, with release (manual-run)
   // machines as a fallback only for schedules that have no direct association.

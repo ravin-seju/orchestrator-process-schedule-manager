@@ -2,12 +2,13 @@
 
 import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { stressFolderRuntimes, stressRobotNames, stressUsage } from '@/features/schedules/stressData'
+import { stressFolderRuntimes, stressRobotNames, stressUsage, stressUsageWindow } from '@/features/schedules/stressData'
 import { UtilizationView } from '@/features/utilization/components/UtilizationView'
 import { buildUtilizationModel, type UtilizationInput } from '@/features/utilization/model'
 
+beforeEach(() => localStorage.clear())
 afterEach(() => cleanup())
 
 const folderNames = new Map([
@@ -33,6 +34,7 @@ const renderView = (
           usage: stressUsage,
           excludedFolderIds: new Set(),
           sinceDays: 30,
+          usageWindow: stressUsageWindow,
           robotNames: stressRobotNames,
           folderNames,
           ...overrides,
@@ -195,10 +197,94 @@ describe('UtilizationView', () => {
   it('charts busy runtimes for each hour of the day and labels the peak', async () => {
     renderView()
 
-    expect(document.querySelectorAll('.utilization-hourly-bar')).toHaveLength(24)
-    expect(screen.getByText('Peak 02:00 · 85% of capacity')).toBeInTheDocument()
-    fireEvent.focus(document.querySelector('.utilization-hourly-bar[data-peak="true"]') as HTMLElement)
+    const chart = screen.getByRole('group', { name: 'Busy by hour' })
+    expect(chart.querySelectorAll('.utilization-chart-bar')).toHaveLength(24)
+    expect(within(chart).getByText('Peak 02:00 · 85%')).toBeInTheDocument()
+    fireEvent.focus(chart.querySelector('[data-mark="peak"]') as HTMLElement)
     expect((await screen.findByRole('tooltip')).textContent).toBe('02:00–03:00: avg 8.5 of 10 runtimes busy (85%)')
+  })
+
+  it('puts the four charts in one row under the meter', () => {
+    renderView()
+
+    const row = document.querySelector('.utilization-charts') as HTMLElement
+    expect([...row.querySelectorAll('[role="group"]')].map((card) => card.getAttribute('aria-label'))).toEqual([
+      'Busy by hour',
+      'Weekday × hour',
+      'Daily · last 30 days',
+      'Wait before start',
+    ])
+    expect(document.querySelector('.utilization-meter-block')?.nextElementSibling).toBe(row)
+  })
+
+  it('shades a weekday by hour grid and names the quietest hour', async () => {
+    renderView()
+
+    const chart = screen.getByRole('group', { name: 'Weekday × hour' })
+    expect(chart.querySelectorAll('.utilization-week-cell')).toHaveLength(168)
+    const quiet = chart.querySelectorAll('[data-quiet="true"]')
+    expect(quiet).toHaveLength(1)
+    expect(within(chart).getByText(/^Quietest (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d\d:00 · \d+%$/)).toBeInTheDocument()
+    fireEvent.focus(quiet[0] as HTMLElement)
+    expect((await screen.findByRole('tooltip')).textContent).toMatch(/^\w{3} \d\d:00–\d\d:00: avg [\d.]+ of 10 runtimes busy \(\d+%\)$/)
+  })
+
+  it('charts each day of the window and marks the lowest full day', async () => {
+    renderView()
+
+    const chart = screen.getByRole('group', { name: 'Daily · last 30 days' })
+    // 30 days from a moment mid-day touch 31 calendar days.
+    expect(chart.querySelectorAll('.utilization-chart-bar').length).toBeGreaterThanOrEqual(30)
+    const low = chart.querySelectorAll('[data-mark="low"]')
+    expect(low).toHaveLength(1)
+    // The stress data has an outage 12 days back.
+    const outage = new Date(stressUsageWindow.endMs - 12 * 24 * 3600 * 1000)
+    const outageText = outage.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    expect(within(chart).getByText(new RegExp(`^Lowest ${outageText} · \\d+%$`))).toBeInTheDocument()
+  })
+
+  it('charts waits by band, with 5 minutes and over marked', async () => {
+    renderView()
+
+    const chart = screen.getByRole('group', { name: 'Wait before start' })
+    expect(chart.querySelectorAll('.utilization-chart-bar')).toHaveLength(5)
+    expect(chart.querySelectorAll('[data-mark="warn"]')).toHaveLength(3)
+    expect(within(chart).getByText(/^\d+% wait > 5 min$/)).toBeInTheDocument()
+    fireEvent.focus(chart.querySelector('.utilization-chart-bar') as HTMLElement)
+    expect((await screen.findByRole('tooltip')).textContent).toMatch(/^Under 1 min: [\d,]+ jobs \(\d+%\)$/)
+  })
+
+  it('collapses the tables by default, with a summary on each', () => {
+    renderView()
+
+    const blocks = [...document.querySelectorAll('details.utilization-table-block')] as HTMLDetailsElement[]
+    expect(blocks.map((block) => block.open)).toEqual([false, false, false])
+    expect(blocks.map((block) => block.querySelector('.utilization-table-summary-text')?.textContent)).toEqual([
+      '4 types · 2 offline',
+      '3 accounts · top 62% of hours',
+      '4 root folders · 1 idle',
+    ])
+  })
+
+  it('remembers which tables were left open', () => {
+    renderView()
+
+    const robots = screen.getByText('By robot').closest('details') as HTMLDetailsElement
+    robots.open = true
+    fireEvent(robots, new Event('toggle'))
+    expect(JSON.parse(localStorage.getItem('process-schedule-manager.utilization.open-tables') ?? '[]')).toEqual(['robots'])
+
+    cleanup()
+    renderView()
+    const reopened = [...document.querySelectorAll('details.utilization-table-block')] as HTMLDetailsElement[]
+    expect(reopened.map((block) => block.open)).toEqual([false, true, false])
+  })
+
+  it('does not open a table when its info icon is clicked', () => {
+    renderView()
+
+    const icon = screen.getByRole('img', { name: 'About the robot table' })
+    expect(fireEvent.click(icon)).toBe(false)
   })
 
   it('shows live, wait, failed and concentration signals with their calculations', async () => {
@@ -216,7 +302,7 @@ describe('UtilizationView', () => {
 
   it('does not warn about concentration below 50%', () => {
     renderView({
-      usage: stressUsage.map((entry) => (entry.robotId === 201 ? { ...entry, sec: entry.sec / 4, byHour: entry.byHour.map((sec) => sec / 4) } : entry)),
+      usage: stressUsage.map((entry) => (entry.robotId === 201 ? { ...entry, sec: entry.sec / 4 } : entry)),
     })
     expect(screen.queryByText(/One robot account carries/)).not.toBeInTheDocument()
   })
@@ -228,6 +314,7 @@ describe('UtilizationView', () => {
 
   it('says job history is loading instead of showing empty tables', () => {
     renderView({ folderRuntimes: [], usage: [], robotNames: new Map() }, { isLoading: true })
-    expect(screen.getAllByText('Loading job history…')).toHaveLength(3)
+    // Once on each collapsed table's summary line and once inside each table.
+    expect(screen.getAllByText('Loading job history…')).toHaveLength(6)
   })
 })

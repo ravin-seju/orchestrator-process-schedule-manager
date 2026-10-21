@@ -2481,8 +2481,8 @@ h3 {
 }
 
 /* Utilization view: fills the workspace slot the inventory uses without scrolling the page.
-   The headline rows keep their height, the runtime-type table is capped, and the robot and folder
-   tables take the rest of the height and scroll inside themselves. */
+   The headline, charts and chips keep their height; the collapsible tables take the rest and
+   scroll inside it when opened. */
 .utilization-view {
   display: grid;
   grid-area: workspace;
@@ -2577,61 +2577,70 @@ h3 {
   row-gap: 12px;
 }
 
-/* Tiles on the left, the hour-of-day chart in the space to their right. */
-.utilization-headline {
-  align-items: flex-end;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 28px;
-  justify-content: space-between;
-}
-
-.utilization-headline > .utilization-tiles {
-  flex: 0 1 auto;
-}
-
-.utilization-hourly {
+/* Four chart cards in one row under the meter. */
+.utilization-charts {
   display: grid;
-  flex: 1 1 280px;
-  gap: 3px;
-  max-width: 460px;
-  min-width: 240px;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.utilization-hourly-head {
+.utilization-chart {
+  align-content: start;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.utilization-chart-head {
   align-items: baseline;
   color: var(--text-muted);
   display: flex;
+  flex-wrap: wrap;
   font-size: var(--font-xs);
-  gap: 8px;
+  gap: 0 8px;
   justify-content: space-between;
 }
 
-.utilization-hourly-head strong {
+.utilization-chart-head strong {
   color: var(--text-strong);
   font-weight: 600;
 }
 
-.utilization-hourly-bars {
+.utilization-chart-bars {
   align-items: flex-end;
   border-bottom: 1px solid var(--border);
   display: flex;
   gap: 2px;
-  height: 44px;
+  height: 64px;
   position: relative;
 }
 
-.utilization-hourly-bar {
+.utilization-chart-bars-wide {
+  gap: 8px;
+}
+
+.utilization-chart-bar {
   background: color-mix(in srgb, var(--metric-utilization) 45%, transparent);
   border-radius: 2px 2px 0 0;
   flex: 1 1 0;
 }
 
-.utilization-hourly-bar[data-peak='true'] {
+.utilization-chart-bar[data-mark='peak'] {
   background: var(--teal);
 }
 
-.utilization-hourly-capacity {
+.utilization-chart-bar[data-mark='low'] {
+  background: var(--danger);
+}
+
+.utilization-chart-bar[data-mark='warn'] {
+  background: var(--orange);
+}
+
+.utilization-chart-capacity {
   border-top: 1px dashed var(--text-muted);
   left: 0;
   pointer-events: none;
@@ -2639,11 +2648,54 @@ h3 {
   right: 0;
 }
 
-.utilization-hourly-axis {
+.utilization-chart-axis {
   color: var(--text-muted);
   display: flex;
   font-size: var(--font-xs);
   justify-content: space-between;
+}
+
+/* One label under each bar. */
+.utilization-chart-axis-even {
+  display: grid;
+  gap: 8px;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* Clears the weekday letters so the hours line up with the cells. */
+.utilization-chart-axis-week {
+  padding-left: 11px;
+}
+
+.utilization-week {
+  display: grid;
+  gap: 1px;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
+  height: 64px;
+}
+
+.utilization-week-row {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: 10px repeat(24, minmax(0, 1fr));
+}
+
+.utilization-week-day {
+  color: var(--text-muted);
+  font-size: 8px;
+  line-height: 1;
+}
+
+.utilization-week-cell {
+  background: var(--surface-soft);
+  border-radius: 1px;
+}
+
+.utilization-week-cell[data-quiet='true'] {
+  box-shadow: inset 0 0 0 1px var(--text-strong);
 }
 
 .utilization-chips {
@@ -2726,49 +2778,70 @@ h3 {
   transform: translateX(-100%);
 }
 
-/* The three tables share the height left under the headline. The runtime-type table always keeps
-   its heading, column header and one row (84px) and the robot and folder tables 120px; past that
-   the type table takes up to its content height and each table scrolls inside itself. */
+/* The collapsible tables share the height left under the chips. Collapsed, each is one summary
+   line; opened tables stack, each capped and scrolling inside itself, and the stack scrolls when
+   it outgrows the space. */
 .utilization-panel > .utilization-body {
-  display: grid;
+  display: flex;
   flex: 1 1 0;
-  gap: 12px;
-  grid-template-rows: minmax(84px, max-content) minmax(120px, 1fr);
+  flex-direction: column;
   min-height: 0;
-}
-
-.utilization-tables {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-  min-height: 0;
+  overflow: auto;
 }
 
 .utilization-table-block {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
 }
 
-.utilization-table-block h3 {
+.utilization-table-summary {
+  align-items: baseline;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  list-style: none;
+  padding: 6px 2px;
+}
+
+.utilization-table-summary::-webkit-details-marker {
+  display: none;
+}
+
+.utilization-table-summary::before {
   color: var(--text-muted);
-  flex: 0 0 auto;
+  content: '\25B8';
+  font-size: 12px;
+}
+
+.utilization-table-block[open] > .utilization-table-summary::before {
+  transform: rotate(90deg);
+}
+
+.utilization-table-summary:focus-visible {
+  border-radius: 4px;
+  box-shadow: var(--focus);
+  outline: none;
+}
+
+.utilization-table-summary h3 {
+  color: var(--text-muted);
   font-size: var(--font-sm);
   font-weight: 600;
-  margin: 0 0 6px;
+  margin: 0;
+}
+
+.utilization-table-summary-text {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  margin-left: 4px;
 }
 
 .utilization-table-scroll {
   border: 1px solid var(--border);
   border-radius: 10px;
-  flex: 0 1 auto;
-  min-height: 0;
+  margin-bottom: 8px;
+  max-height: 260px;
   overflow: auto;
-}
-
-/* The runtime-type table usually has a handful of rows; past about five it scrolls. */
-.utilization-types .utilization-table-scroll {
-  max-height: 220px;
 }
 
 .utilization-share-bar {
@@ -2838,8 +2911,13 @@ h3 {
     font-size: 22px;
   }
 
-  .utilization-hourly-bars {
-    height: 30px;
+  .utilization-chart-bars,
+  .utilization-week {
+    height: 52px;
+  }
+
+  .utilization-week-day {
+    font-size: 7px;
   }
 
   .utilization-meter-scale {
@@ -2847,8 +2925,8 @@ h3 {
   }
 }
 
-/* Stacked on narrow screens the tables can't share one screen height, so the panel scrolls
-   instead, and each table gets a fixed scroll height. */
+/* On narrow screens the charts wrap two to a row and can't share one screen height with the
+   tables, so the whole view scrolls instead. */
 @media (max-width: 900px) {
   .utilization-view {
     overflow: auto;
@@ -2859,17 +2937,18 @@ h3 {
   }
 
   .utilization-panel > .utilization-body {
-    display: flex;
     flex: 0 0 auto;
-    flex-direction: column;
+    overflow: visible;
   }
 
-  .utilization-tables {
+  .utilization-charts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .utilization-charts {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .utilization-table-scroll {
-    max-height: 420px;
   }
 }
 

@@ -128,16 +128,34 @@ describe('loadJobHistory usage', () => {
 
     expect(usage.map(brief)).toEqual([{ folderId: 200, runtimeType: 'Unattended', robotId: 1, sec: 1200 }])
   })
-  it('splits busy time by local hour of day, including across midnight', async () => {
-    const start = new Date(2026, 9, 1, 23, 30).toISOString() // 23:30 local
-    fetchAllPages.mockResolvedValue([job('Successful', start, 120)]) // until 01:30 local
+  it('splits busy time by local weekday, hour and day, including across midnight', async () => {
+    const start = new Date(2026, 9, 1, 23, 30).toISOString() // Thursday 23:30 local
+    fetchAllPages.mockResolvedValue([job('Successful', start, 120)]) // until Friday 01:30 local
 
     const [entry] = (await loadJobHistory(sdk, 'Demo', [100], 30)).usage
 
-    expect(entry.byHour[23]).toBe(1800)
-    expect(entry.byHour[0]).toBe(3600)
-    expect(entry.byHour[1]).toBe(1800)
-    expect(entry.byHour.reduce((sum, sec) => sum + sec, 0)).toBe(entry.sec)
+    const thursday = 3 * 24
+    const friday = 4 * 24
+    expect(entry.byWeekdayHour).toHaveLength(168)
+    expect(entry.byWeekdayHour[thursday + 23]).toBe(1800)
+    expect(entry.byWeekdayHour[friday + 0]).toBe(3600)
+    expect(entry.byWeekdayHour[friday + 1]).toBe(1800)
+    expect(entry.byWeekdayHour.reduce((sum, sec) => sum + sec, 0)).toBe(entry.sec)
+    expect(entry.byDay).toEqual({ '2026-10-01': 1800, '2026-10-02': 5400 })
+  })
+
+  it('returns the window the history covers', async () => {
+    fetchAllPages.mockResolvedValue([])
+    const day = 24 * 60 * 60 * 1000
+
+    const before = Date.now()
+    const { window: covered } = await loadJobHistory(sdk, 'Demo', [100], 30)
+    const after = Date.now()
+
+    expect(covered.startMs).toBeGreaterThanOrEqual(before - 30 * day)
+    expect(covered.startMs).toBeLessThanOrEqual(after - 30 * day)
+    expect(covered.endMs).toBeGreaterThanOrEqual(before)
+    expect(covered.endMs).toBeLessThanOrEqual(after)
   })
 
   it('records failed time and waits by band, skipping jobs without a usable creation time', async () => {

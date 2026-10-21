@@ -1,4 +1,11 @@
-import type { UsageEntry } from '@/features/jobs/orchestrator'
+import {
+  forEachLocalHour,
+  localDayKey,
+  localWeekday,
+  WAIT_BUCKET_LIMITS_SEC,
+  type UsageEntry,
+  type UsageWindow,
+} from '@/features/jobs/orchestrator'
 import type { FolderRuntimeEntry } from '@/features/machines/orchestrator'
 import { isCountedRuntimeType, runtimeTypeLabel } from '@/features/orchestrator/runtimeTypes'
 
@@ -61,11 +68,33 @@ export interface HourBucket {
   pctOfCapacity: number | null
 }
 
+// One weekday and hour of the week, Monday = weekday 0, averaged over the times it occurs in the
+// window.
+export interface WeekSlot {
+  weekday: number
+  hour: number
+  avgBusy: number
+  pctOfCapacity: number | null
+}
+
+export interface DayBucket {
+  // Local calendar day, YYYY-MM-DD.
+  day: string
+  hours: number
+  // Average runtimes busy over the part of the day inside the window.
+  avgBusy: number
+  pctOfCapacity: number | null
+  // The whole day is inside the window; the first and last days are usually partial.
+  full: boolean
+}
+
 export interface WaitSummary {
   jobCount: number
   avgWaitMin: number
   // Share of jobs that waited more than 5 minutes between creation and start.
   over5MinPct: number
+  // Job counts per wait band (see WAIT_BUCKET_LIMITS_SEC).
+  bands: number[]
 }
 
 export interface UtilizationModel {
@@ -88,6 +117,12 @@ export interface UtilizationModel {
   live: LiveRuntimeStatus | null
   hourly: HourBucket[]
   peakHour: HourBucket | null
+  // 168 slots, Monday 00:00 first; empty when the job history window is unknown.
+  week: WeekSlot[]
+  quietestSlot: WeekSlot | null
+  // Every local day in the window, oldest first; empty when the window is unknown.
+  daily: DayBucket[]
+  lowestDay: DayBucket | null
   wait: WaitSummary | null
   failedHours: number
   failedPct: number
@@ -103,6 +138,8 @@ export interface UtilizationInput {
   // Personal workspace folders: their robots are people's own, not the shared fleet.
   excludedFolderIds: ReadonlySet<number>
   sinceDays: number
+  // The span the job history covers; the weekly and daily charts average over it.
+  usageWindow: UsageWindow | null
   robotNames: Map<number, string>
   folderNames: Map<number, string>
 }
@@ -123,6 +160,7 @@ export function buildUtilizationModel({
   usage,
   excludedFolderIds,
   sinceDays,
+  usageWindow,
   robotNames,
   folderNames,
 }: UtilizationInput): UtilizationModel {
@@ -161,8 +199,9 @@ export function buildUtilizationModel({
   let failedSec = 0
   let waitSec = 0
   let waitCount = 0
-  let waitOver5Min = 0
-  const byHour = new Array<number>(24).fill(0)
+  const waitBands = new Array<number>(WAIT_BUCKET_LIMITS_SEC.length + 1).fill(0)
+  const byWeekdayHour = new Array<number>(7 * HOURS_PER_DAY).fill(0)
+  const byDay = new Map<string, number>()
   const byRobotType = new Map<number, Map<string, number>>()
   const byFolder = new Map<number, number>()
   const secByType = new Map<string | null, number>()
@@ -177,9 +216,9 @@ export function buildUtilizationModel({
     failedSec += entry.failedSec
     waitSec += entry.waitSec
     waitCount += entry.waitCount
-    // Bands 2 onward are 5 minutes or more (see WAIT_BUCKET_LIMITS_SEC).
-    waitOver5Min += entry.waitBuckets.slice(2).reduce((sum, count) => sum + count, 0)
-    entry.byHour.forEach((sec, hour) => (byHour[hour] += sec))
+    entry.waitBuckets.forEach((count, band) => (waitBands[band] += count))
+    entry.byWeekdayHour.forEach((sec, slot) => (byWeekdayHour[slot] += sec))
+    for (const [day, sec] of Object.entries(entry.byDay)) add(byDay, day, sec)
     add(byFolder, entry.folderId, entry.sec)
     if (entry.robotId != null) {
       const types = byRobotType.get(entry.robotId) ?? new Map<string, number>()
@@ -261,12 +300,48 @@ export function buildUtilizationModel({
         Number(b.counted) - Number(a.counted) || b.hours - a.hours || b.runtimes - a.runtimes || a.label.localeCompare(b.label),
     )
 
+  const pctOfCapacity = (avgBusy: number) => (capacityRuntimes ? (avgBusy / capacityRuntimes) * 100 : null)
+
   // Hour of day: busy seconds in that hour over the window / (days x 3600) = average runtimes busy.
-  const hourly: HourBucket[] = byHour.map((sec, hour) => {
+  const hourly: HourBucket[] = Array.from({ length: HOURS_PER_DAY }, (_, hour) => {
+    let sec = 0
+    for (let weekday = 0; weekday < 7; weekday++) sec += byWeekdayHour[weekday * HOURS_PER_DAY + hour]
     const avgBusy = sinceDays > 0 ? sec / (sinceDays * 3600) : 0
-    return { hour, avgBusy, pctOfCapacity: capacityRuntimes ? (avgBusy / capacityRuntimes) * 100 : null }
+    return { hour, avgBusy, pctOfCapacity: pctOfCapacity(avgBusy) }
   })
   const peakHour = consumedSec > 0 ? hourly.reduce((peak, bucket) => (bucket.avgBusy > peak.avgBusy ? bucket : peak)) : null
+
+  // Week and day averages divide by how much of each slot and day the window covers, so the
+  // partial first and last days, and a weekday that occurs four times rather than five, aren't
+  // understated.
+  const slotCoverSec = new Array<number>(7 * HOURS_PER_DAY).fill(0)
+  const dayCoverSec = new Map<string, number>()
+  if (usageWindow) {
+    forEachLocalHour(usageWindow.startMs, usageWindow.endMs, (date, sec) => {
+      slotCoverSec[localWeekday(date) * HOURS_PER_DAY + date.getHours()] += sec
+      add(dayCoverSec, localDayKey(date), sec)
+    })
+  }
+  const week: WeekSlot[] = usageWindow
+    ? byWeekdayHour.map((sec, slot) => {
+        const avgBusy = slotCoverSec[slot] > 0 ? sec / slotCoverSec[slot] : 0
+        return { weekday: Math.floor(slot / HOURS_PER_DAY), hour: slot % HOURS_PER_DAY, avgBusy, pctOfCapacity: pctOfCapacity(avgBusy) }
+      })
+    : []
+  const quietestSlot =
+    consumedSec > 0 && week.length > 0
+      ? week.filter((_, slot) => slotCoverSec[slot] > 0).reduce((low, slot) => (slot.avgBusy < low.avgBusy ? slot : low))
+      : null
+  const daily: DayBucket[] = [...dayCoverSec.entries()].map(([day, coverSec]) => {
+    const [year, month, date] = day.split('-').map(Number)
+    const fullSec = (new Date(year, month - 1, date + 1).getTime() - new Date(year, month - 1, date).getTime()) / 1000
+    const sec = byDay.get(day) ?? 0
+    const avgBusy = sec / coverSec
+    return { day, hours: sec / 3600, avgBusy, pctOfCapacity: pctOfCapacity(avgBusy), full: coverSec >= fullSec }
+  })
+  const fullDays = daily.filter((day) => day.full)
+  const lowestDay =
+    consumedSec > 0 && fullDays.length > 0 ? fullDays.reduce((low, day) => (day.avgBusy < low.avgBusy ? day : low)) : null
 
   const top = robots[0]
 
@@ -296,9 +371,19 @@ export function buildUtilizationModel({
         : null,
     hourly,
     peakHour,
+    week,
+    quietestSlot,
+    daily,
+    lowestDay,
     wait:
       waitCount > 0
-        ? { jobCount: waitCount, avgWaitMin: waitSec / waitCount / 60, over5MinPct: (waitOver5Min / waitCount) * 100 }
+        ? {
+            jobCount: waitCount,
+            avgWaitMin: waitSec / waitCount / 60,
+            // Bands 2 onward are 5 minutes or more (see WAIT_BUCKET_LIMITS_SEC).
+            over5MinPct: (waitBands.slice(2).reduce((sum, count) => sum + count, 0) / waitCount) * 100,
+            bands: waitBands,
+          }
         : null,
     failedHours: failedSec / 3600,
     failedPct: share(failedSec),

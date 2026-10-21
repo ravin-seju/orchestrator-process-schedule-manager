@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { UiPath } from '@uipath/uipath-typescript/core'
-import { aggregateRuntimes, loadJobHistory, type UsageEntry } from '../orchestrator'
+import { aggregateRuntimes, loadJobHistory, type UsageEntry, type UsageWindow } from '../orchestrator'
 import { isTestingPath } from '@/features/schedules/calendarDisplay'
 import type { RuntimeStats } from '@/features/schedules/types'
 import { cacheGetEntry, cacheSet, cacheKey } from '@/features/orchestrator/cache'
@@ -14,6 +14,7 @@ type CachedRuntime = {
   scheduleMachineIds: [number, number[]][]
   releaseMachineIds: [number, number[]][]
   usage: UsageEntry[]
+  usageWindow: UsageWindow
   folderKey: string
   sinceDays: number
 }
@@ -33,6 +34,7 @@ export function useJobRuntimes(
   const [scheduleMachineIds, setScheduleMachineIds] = useState<Map<number, number[]>>(new Map())
   const [releaseMachineIds, setReleaseMachineIds] = useState<Map<number, number[]>>(new Map())
   const [usage, setUsage] = useState<UsageEntry[]>([])
+  const [usageWindow, setUsageWindow] = useState<UsageWindow | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -49,6 +51,7 @@ export function useJobRuntimes(
         setScheduleMachineIds(m.stressScheduleMachineIds)
         setReleaseMachineIds(m.stressReleaseMachineIds)
         setUsage(m.stressUsage)
+        setUsageWindow(m.stressUsageWindow)
       })
       return () => { isActive = false }
     }
@@ -67,7 +70,7 @@ export function useJobRuntimes(
       const cached = cacheGetEntry<CachedRuntime>(statsKey)
 
       const revalidate = async () => {
-        const { rows, robotNames: names, machineNames: mNames, scheduleMachineIds: schedMachines, releaseMachineIds: relMachines, usage: jobUsage } =
+        const { rows, robotNames: names, machineNames: mNames, scheduleMachineIds: schedMachines, releaseMachineIds: relMachines, usage: jobUsage, window: jobWindow } =
           await loadJobHistory(sdk, tenantName, folderIds!, sinceDays)
         if (!isActive) return
         const stats = aggregateRuntimes(rows)
@@ -78,6 +81,7 @@ export function useJobRuntimes(
           scheduleMachineIds: [...schedMachines.entries()],
           releaseMachineIds: [...relMachines.entries()],
           usage: jobUsage,
+          usageWindow: jobWindow,
           folderKey: sortedFolderKey,
           sinceDays,
         }, RUNTIME_STATS_TTL_MS)
@@ -87,6 +91,7 @@ export function useJobRuntimes(
         setScheduleMachineIds(schedMachines)
         setReleaseMachineIds(relMachines)
         setUsage(jobUsage)
+        setUsageWindow(jobWindow)
       }
 
       if (cached && cached.data.folderKey === sortedFolderKey && cached.data.sinceDays === sinceDays) {
@@ -97,6 +102,7 @@ export function useJobRuntimes(
         setScheduleMachineIds(new Map(cached.data.scheduleMachineIds ?? []))
         setReleaseMachineIds(new Map(cached.data.releaseMachineIds ?? []))
         setUsage(cached.data.usage)
+        setUsageWindow(cached.data.usageWindow)
         if (cached.isStale) {
           revalidate().catch((err) => console.warn('Background runtime refresh failed:', err))
         }
@@ -125,5 +131,5 @@ export function useJobRuntimes(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sdk, tenantName, folderKey, sinceDays])
 
-  return { runtimeStats, robotNames, machineNames, scheduleMachineIds, releaseMachineIds, usage, isLoading, error }
+  return { runtimeStats, robotNames, machineNames, scheduleMachineIds, releaseMachineIds, usage, usageWindow, isLoading, error }
 }
