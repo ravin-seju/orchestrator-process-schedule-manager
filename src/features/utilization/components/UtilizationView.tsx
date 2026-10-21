@@ -541,6 +541,36 @@ function SignalChips({ model, fetchedAt, sinceDays }: { model: UtilizationModel;
       </Chip>,
     )
   }
+  const peak = model.peakConcurrency
+  if (peak) {
+    const capacity = model.capacityRuntimes
+    const peakAt = new Date(peak.atMs).toLocaleString([], {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    chips.push(
+      <Chip
+        key="peak"
+        hint={
+          <>
+            {formatNumber(peak.runtimes)} counted {peak.runtimes === 1 ? 'job' : 'jobs'} ran at the same moment on {peakAt},
+            the most at any point in the last {sinceDays} days, from each job's start and end times. Each job holds one
+            runtime, so {formatNumber(peak.runtimes)} {peak.runtimes === 1 ? 'runtime was' : 'runtimes were'} in use at once.
+            {capacity && peak.runtimes > capacity
+              ? ` That is more than the ${formatNumber(capacity)} counted as capacity, so the real capacity is at least ${formatNumber(peak.runtimes)}.`
+              : null}
+          </>
+        }
+      >
+        Peak at once: {formatNumber(peak.runtimes)}
+        {capacity ? ` of ${formatNumber(capacity)}` : ''} {peak.runtimes === 1 && !capacity ? 'runtime' : 'runtimes'}{' '}
+        <span className="utilization-chip-muted">({peakAt})</span>
+      </Chip>,
+    )
+  }
   if (wait) {
     chips.push(
       <Chip

@@ -300,6 +300,26 @@ describe('UtilizationView', () => {
     expect((await screen.findByRole('tooltip')).textContent).toContain('From Finance Ops, the folder with the most counted runtimes: 10 deployed.')
   })
 
+  it('shows the most runtimes in use at once against capacity, with its calculation', async () => {
+    renderView()
+
+    const chips = within(screen.getByRole('list', { name: 'Operational signals' }))
+    const chip = chips.getByText(/Peak at once: 6 of 10 runtimes/)
+    fireEvent.focus(chip)
+    const hint = (await screen.findByRole('tooltip')).textContent
+    expect(hint).toContain('6 counted jobs ran at the same moment')
+    expect(hint).toContain('so 6 runtimes were in use at once.')
+    expect(hint).not.toContain('real capacity is at least')
+  })
+
+  it('says capacity must be higher when more runs overlapped than capacity counts', async () => {
+    renderView({ folderRuntimes: [{ folderId: 8102, runtimeType: 'Unattended', total: 4, connected: 4, available: 0 }] })
+
+    const chip = within(screen.getByRole('list', { name: 'Operational signals' })).getByText(/Peak at once: 6 of 4 runtimes/)
+    fireEvent.focus(chip)
+    expect((await screen.findByRole('tooltip')).textContent).toContain('so the real capacity is at least 6.')
+  })
+
   it('does not warn about concentration below 50%', () => {
     renderView({
       usage: stressUsage.map((entry) => (entry.robotId === 201 ? { ...entry, sec: entry.sec / 4 } : entry)),

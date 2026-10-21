@@ -23,6 +23,7 @@ const usageOf = (
   waitSec: 0,
   waitCount: 0,
   waitBuckets: [0, 0, 0, 0, 0],
+  intervals: [],
   ...extra,
 })
 
@@ -282,6 +283,53 @@ describe('buildUtilizationModel operational signals', () => {
     const model = buildUtilizationModel(input({ usageWindow: twoWeeks }))
     expect(model.daily).toHaveLength(14)
     expect(model.daily.every((day) => day.hours === 0 && day.full)).toBe(true)
+  })
+
+  it('finds the most runs overlapping at once, and when', () => {
+    // Offsets in seconds from the window start. Robot 1 runs 0-100 and 200-300; robot 2 runs 50-250.
+    const model = buildUtilizationModel(
+      input({
+        usage: [
+          usageOf(100, 'Unattended', 1, 1, { intervals: [0, 100, 200, 300] }),
+          usageOf(200, 'Unattended', 2, 1, { intervals: [50, 250] }),
+        ],
+        usageWindow: twoWeeks,
+      }),
+    )
+    expect(model.peakConcurrency).toEqual({ runtimes: 2, atMs: twoWeeks.startMs + 50_000 })
+  })
+
+  it('does not count a run that starts as another ends as overlapping', () => {
+    const model = buildUtilizationModel(
+      input({
+        usage: [
+          usageOf(100, 'Unattended', 1, 1, { intervals: [0, 100] }),
+          usageOf(100, 'Unattended', 2, 1, { intervals: [100, 200] }),
+        ],
+        usageWindow: twoWeeks,
+      }),
+    )
+    expect(model.peakConcurrency?.runtimes).toBe(1)
+  })
+
+  it('leaves uncounted runtime types and excluded folders out of the peak', () => {
+    const model = buildUtilizationModel(
+      input({
+        usage: [
+          usageOf(100, 'Unattended', 1, 1, { intervals: [0, 100] }),
+          usageOf(100, 'Development', 2, 1, { intervals: [0, 100] }),
+          usageOf(300, 'Unattended', 3, 1, { intervals: [0, 100] }),
+        ],
+        excludedFolderIds: new Set([300]),
+        usageWindow: twoWeeks,
+      }),
+    )
+    expect(model.peakConcurrency?.runtimes).toBe(1)
+  })
+
+  it('has no peak without a window or without runs', () => {
+    expect(buildUtilizationModel(input({ usage: [usageOf(100, 'Unattended', 1, 1, { intervals: [0, 100] })] })).peakConcurrency).toBeNull()
+    expect(buildUtilizationModel(input({ usageWindow: twoWeeks })).peakConcurrency).toBeNull()
   })
 
   it('has no weekly or daily figures without a window', () => {

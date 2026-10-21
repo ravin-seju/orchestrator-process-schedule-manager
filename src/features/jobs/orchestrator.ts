@@ -64,6 +64,9 @@ export interface UsageEntry {
   waitSec: number
   waitCount: number
   waitBuckets: number[]
+  // Each run as start and end, in whole seconds from the window start: [start, end, start, end, …].
+  // Kept so the model can count how many runs overlapped at once across the entries it counts.
+  intervals: number[]
 }
 
 // Upper bounds of the wait-time bands: under 1 min, 1-5 min, 5-15 min, 15-60 min, then over 60 min.
@@ -136,6 +139,7 @@ export async function loadJobHistory(
 ): Promise<JobHistoryResult> {
   const sinceDate = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000)
   const sinceIso = sinceDate.toISOString()
+  const sinceMs = sinceDate.getTime()
 
   const settled = await settledBatch(
     folderIds,
@@ -197,10 +201,12 @@ export async function loadJobHistory(
             waitSec: 0,
             waitCount: 0,
             waitBuckets: new Array<number>(WAIT_BUCKET_LIMITS_SEC.length + 1).fill(0),
+            intervals: [],
           }
           usageByKey.set(key, entry)
         }
         entry.sec += durationSec
+        entry.intervals.push(Math.round((start - sinceMs) / 1000), Math.round((end - sinceMs) / 1000))
         if (job.State !== 'Successful') entry.failedSec += durationSec
         addByTime(entry, start, end)
         const created = toEpoch(job.CreationTime)
@@ -236,7 +242,7 @@ export async function loadJobHistory(
     scheduleMachineIds,
     releaseMachineIds,
     usage: [...usageByKey.values()],
-    window: { startMs: sinceDate.getTime(), endMs: Date.now() },
+    window: { startMs: sinceMs, endMs: Date.now() },
   }
 }
 

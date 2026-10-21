@@ -144,6 +144,18 @@ describe('loadJobHistory usage', () => {
     expect(entry.byDay).toEqual({ '2026-10-01': 1800, '2026-10-02': 5400 })
   })
 
+  it('keeps each run as seconds from the window start', async () => {
+    fetchAllPages.mockResolvedValue([job('Successful', '2026-10-01T10:00:00Z', 60), job('Faulted', '2026-10-01T12:00:00Z', 30)])
+
+    const { usage, window: covered } = await loadJobHistory(sdk, 'Demo', [100], 30)
+
+    const [entry] = usage
+    expect(entry.intervals).toHaveLength(4)
+    expect(entry.intervals[1] - entry.intervals[0]).toBe(3600)
+    expect(entry.intervals[3] - entry.intervals[2]).toBe(1800)
+    expect(Math.abs(covered.startMs + entry.intervals[0] * 1000 - Date.parse('2026-10-01T10:00:00Z'))).toBeLessThanOrEqual(500)
+  })
+
   it('returns the window the history covers', async () => {
     fetchAllPages.mockResolvedValue([])
     const day = 24 * 60 * 60 * 1000

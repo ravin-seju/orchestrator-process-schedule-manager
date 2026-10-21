@@ -259,6 +259,16 @@ forEachLocalHour(stressUsageWindow.startMs, stressUsageWindow.endMs, (date, sec)
   stressDayWeights.set(day, (stressDayWeights.get(day) ?? 0) + weight)
 })
 const stressDayWeightSum = [...stressDayWeights.values()].reduce((sum, weight) => sum + weight, 0)
+// Every entry runs one job from 02:00 to 03:00 local on each day after the first, so the six counted
+// entries overlap and the peak is 6 runtimes at once, first reached on the second day of the window.
+// These intervals feed only the peak; the hours above come from the weights.
+const stressIntervals = Array.from({ length: 29 }, (_, index) => {
+  const runStart = new Date(stressUsageWindow.startMs)
+  runStart.setDate(runStart.getDate() + index + 1)
+  runStart.setHours(2, 0, 0, 0)
+  const offsetSec = Math.round((runStart.getTime() - stressUsageWindow.startMs) / 1000)
+  return [offsetSec, offsetSec + 3600]
+}).flat()
 // Jobs by wait band (<1m, 1-5m, 5-15m, 15-60m, >60m) per 100 h of run time.
 const stressWaitPer100h = [60, 25, 10, 4, 1]
 const stressUsageEntry = (folderId: number, runtimeType: string, robotId: number, h: number): UsageEntry => {
@@ -281,6 +291,7 @@ const stressUsageEntry = (folderId: number, runtimeType: string, robotId: number
     waitSec: waitCount * 150,
     waitCount,
     waitBuckets,
+    intervals: stressIntervals,
   }
 }
 export const stressFolderRuntimes: FolderRuntimeEntry[] = [

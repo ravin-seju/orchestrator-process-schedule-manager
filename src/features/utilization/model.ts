@@ -128,6 +128,9 @@ export interface UtilizationModel {
   failedPct: number
   // Set when one robot account carries at least CONCENTRATION_WARNING_PCT of consumed hours.
   concentration: { name: string; sharePct: number } | null
+  // Most counted runs overlapping at one moment in the window, and when that first happened. Each run
+  // holds one runtime, so this many runtimes were in use at once. Null without job history.
+  peakConcurrency: { runtimes: number; atMs: number } | null
 }
 
 export const CONCENTRATION_WARNING_PCT = 50
@@ -202,6 +205,7 @@ export function buildUtilizationModel({
   const waitBands = new Array<number>(WAIT_BUCKET_LIMITS_SEC.length + 1).fill(0)
   const byWeekdayHour = new Array<number>(7 * HOURS_PER_DAY).fill(0)
   const byDay = new Map<string, number>()
+  const intervals: number[][] = []
   const byRobotType = new Map<number, Map<string, number>>()
   const byFolder = new Map<number, number>()
   const secByType = new Map<string | null, number>()
@@ -219,6 +223,7 @@ export function buildUtilizationModel({
     entry.waitBuckets.forEach((count, band) => (waitBands[band] += count))
     entry.byWeekdayHour.forEach((sec, slot) => (byWeekdayHour[slot] += sec))
     for (const [day, sec] of Object.entries(entry.byDay)) add(byDay, day, sec)
+    intervals.push(entry.intervals)
     add(byFolder, entry.folderId, entry.sec)
     if (entry.robotId != null) {
       const types = byRobotType.get(entry.robotId) ?? new Map<string, number>()
@@ -345,6 +350,20 @@ export function buildUtilizationModel({
 
   const top = robots[0]
 
+  // Sweep the run starts and ends in time order. At the same second an end comes before a start, so
+  // a run that begins as another finishes isn't counted as overlapping it.
+  const events: [number, number][] = []
+  for (const list of intervals) {
+    for (let i = 0; i + 1 < list.length; i += 2) events.push([list[i], 1], [list[i + 1], -1])
+  }
+  events.sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  let running = 0
+  let peak: { runtimes: number; atSec: number } | null = null
+  for (const [sec, delta] of events) {
+    running += delta
+    if (running > (peak?.runtimes ?? 0)) peak = { runtimes: running, atSec: sec }
+  }
+
   return {
     source,
     capacityRuntimes,
@@ -389,6 +408,8 @@ export function buildUtilizationModel({
     failedPct: share(failedSec),
     concentration:
       top && top.sharePct >= CONCENTRATION_WARNING_PCT && windowSec > 0 ? { name: top.name, sharePct: top.sharePct } : null,
+    peakConcurrency:
+      peak && usageWindow ? { runtimes: peak.runtimes, atMs: usageWindow.startMs + peak.atSec * 1000 } : null,
   }
 }
 
